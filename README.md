@@ -144,10 +144,11 @@ All secrets are stored using Google Apps Script Script Properties.
 
 ### Generated PDF
 
-> 💡 Below is a preview of the generated document. You can view or download the full file here:
-![Screenshot PDF](pdf/screenshot%202026-06-28%20210307.png) [Werkbon_ENG-20260518-004.pdf](pdf/Werkbon_ENG-20260518-004.pdf).
-
-![Generated PDF Preview](screenshots/screenshot%202026-07-07%20011727.png)
+> 💡 Below is an example of the generated maintenance work order.
+(image)
+![Generated PDF Preview](pdf/screenshot%202026-06-28%20210307.png) 
+Sample PDF:
+[Werkbon_ENG-20260518-004.pdf](pdf/Werkbon_ENG-20260518-004.pdf).
 
 
 ---
@@ -189,5 +190,4 @@ https://github.com/DorianGray-web
 
 ---
 
-⭐ If you find this project useful, consider giving it a star!# Generator-Werkbon-GAS
-Google Apps Script automation for AI receipt recognition and PDF work order generation
+⭐ If you find this project useful, consider giving it a star!
