@@ -1,4 +1,4 @@
-# 🚀 Generator-Werkbon-GAS
+#  Generator-Werkbon-GAS
 
 > AI-powered Google Apps Script automation for receipt recognition and PDF work order generation.
 
@@ -9,7 +9,7 @@
 
 ---
 
-## 📖 Overview
+##  Overview
 
 Generator-Werkbon-GAS is a Google Apps Script project designed to automate the creation of maintenance work orders (Werkbon).
 
@@ -19,7 +19,7 @@ The project was developed to reduce repetitive administrative work and demonstra
 
 ---
 
-## 📊 Project Goals
+##  Project Goals
 
 - Reduce manual data entry from receipts
 - Minimize human errors
@@ -29,21 +29,21 @@ The project was developed to reduce repetitive administrative work and demonstra
 
 ---
 
-## ✨ Features
+##  Features
 
-- 🤖 AI receipt recognition using OpenAI GPT-4o Vision
-- 📷 Automatic processing of receipt images
-- 📦 Material extraction (name, quantity, price)
-- 📊 Google Sheets integration
-- 📄 Google Docs template engine
-- 📑 Automatic PDF generation
-- ☁ Google Drive integration
-- ⚡ Optimized export performance
-- 🔐 Secure configuration using Script Properties
+-  AI receipt recognition using OpenAI GPT-4o Vision
+-  Automatic processing of receipt images
+-  Material extraction (name, quantity, price)
+-  Google Sheets integration
+-  Google Docs template engine
+-  Automatic PDF generation
+-  Google Drive integration
+-  Optimized export performance
+-  Secure configuration using Script Properties
 
 ---
 
-## 🔄 Workflow
+##  Workflow
 
 ```text
 Receipt Image
@@ -66,7 +66,7 @@ PDF Work Order
 
 ---
 
-## 🛠 Technologies
+##  Technologies
 
 - Google Apps Script
 - JavaScript (ES6)
@@ -77,7 +77,7 @@ PDF Work Order
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```text
 Generator-Werkbon-GAS
@@ -92,7 +92,7 @@ Generator-Werkbon-GAS
 
 ---
 
-## ⚙ Configuration
+##  Configuration
 
 Store sensitive information using **Google Apps Script → Script Properties**.
 
@@ -108,7 +108,7 @@ Required properties:
 
 ---
 
-## 🚀 Installation
+##  Installation
 
 1. Clone the repository.
 2. Create a new Google Apps Script project.
@@ -121,7 +121,7 @@ Required properties:
 
 ---
 
-## 🔐 Security
+##  Security
 
 This repository **does not contain**:
 
@@ -134,7 +134,7 @@ All secrets are stored using Google Apps Script Script Properties.
 
 ---
 
-## 📸 Screenshots
+##  Screenshots
 
 ### Google Sheets
 
@@ -144,7 +144,7 @@ All secrets are stored using Google Apps Script Script Properties.
 
 ### Generated PDF
 
-> 💡 Below is an example of the generated maintenance work order.
+>  Below is an example of the generated maintenance work order.
 (image)
 ![Generated PDF Preview](pdf/screenshot%202026-06-28%20210307.png) 
 Sample PDF:
@@ -153,7 +153,7 @@ Sample PDF:
 
 ---
 
-## 📈 Future Roadmap
+##  Future Roadmap
 
 - [ ] Modular project structure
 - [ ] Batch receipt processing
@@ -165,7 +165,7 @@ Sample PDF:
 
 ---
 
-## 💡 Why this project?
+##  Why this project?
 
 This project was created to automate the preparation of maintenance work orders for municipal housing facilities in the Netherlands.
 
@@ -175,13 +175,13 @@ The goal is to reduce administrative work, improve accuracy, and demonstrate pra
 
 ---
 
-## 📜 License
+##  License
 
 This project is licensed under the MIT License.
 
 ---
 
-## 👤 Author
+##  Author
 
 **Denys Ostroushko**
 

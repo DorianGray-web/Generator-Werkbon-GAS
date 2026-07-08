@@ -15,6 +15,24 @@ const SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPRE
 const TEMPLATE_DOC_ID = PropertiesService.getScriptProperties().getProperty('TEMPLATE_DOC_ID');
 const PDF_OUTPUT_FOLDER_ID = PropertiesService.getScriptProperties().getProperty('PDF_OUTPUT_FOLDER_ID');
 
+// Optional debug flag. Set to "true" only when you need to inspect raw OpenAI responses.
+const DEBUG_OPENAI_RESPONSE_LOGGING = PropertiesService.getScriptProperties().getProperty('DEBUG_OPENAI_RESPONSE_LOGGING');
+
+function getRequiredConfigValue(value, propertyName) {
+  if (!value || value.toString().trim() === "") {
+    throw new Error(
+      `Missing required script property: ${propertyName}. ` +
+      "Set it in Apps Script Project Settings > Script properties."
+    );
+  }
+
+  return value.toString().trim();
+}
+
+function isDebugEnabled(value) {
+  return value && value.toString().trim().toLowerCase() === "true";
+}
+
 // =========================================================================
 // MAIN AUTOMATION FUNCTIONS
 // =========================================================================
@@ -24,7 +42,10 @@ const PDF_OUTPUT_FOLDER_ID = PropertiesService.getScriptProperties().getProperty
  * Function 1: Scan a Google Drive folder and automatically extract receipt data with OpenAI GPT-4o
  */
 function processNewReceipts() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheetId = getRequiredConfigValue(SPREADSHEET_ID, 'SPREADSHEET_ID');
+  const receiptsFolderId = getRequiredConfigValue(OPENAI_RECEIPTS_FOLDER_ID, 'OPENAI_RECEIPTS_FOLDER_ID');
+
+  const ss = SpreadsheetApp.openById(spreadsheetId);
   const generalSheet = ss.getSheetByName('Werkbonnen');
   const matSheet = ss.getSheetByName('Werkbon_Materialen');
   
@@ -52,7 +73,7 @@ function processNewReceipts() {
   console.log(`Successfully identified the target order ID: ${bonId}`);
 
   // Step 2: Find the receipt file in the Google Drive folder
-  const folder = DriveApp.getFolderById(OPENAI_RECEIPTS_FOLDER_ID);
+  const folder = DriveApp.getFolderById(receiptsFolderId);
   const files = folder.getFiles();
   
   let fileToProcess = null;
@@ -104,6 +125,8 @@ function processNewReceipts() {
  * Function 2: Direct low-level API request to OpenAI GPT-4o Vision
  */
 function analyzeReceiptWithOpenAI(file) {
+  const openAIApiKey = getRequiredConfigValue(OPENAI_API_KEY, 'OPENAI_API_KEY');
+
   // Defensive check: if no file was passed, log the issue and return without crashing
   if (!file) {
     console.error("CRITICAL ERROR: analyzeReceiptWithOpenAI was called, but the 'file' argument is empty (undefined)!");
@@ -145,7 +168,7 @@ function analyzeReceiptWithOpenAI(file) {
   const options = {
     "method": "post",
     "headers": {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      "Authorization": `Bearer ${openAIApiKey}`,
       "Content-Type": "application/json"
     },
     "payload": JSON.stringify(payload),
@@ -162,7 +185,10 @@ function analyzeReceiptWithOpenAI(file) {
 
   const jsonResponse = JSON.parse(responseText);
   let resultText = jsonResponse.choices[0].message.content.trim();
-  Logger.log("RESPONSE FROM OPENAI: " + resultText);
+
+  if (isDebugEnabled(DEBUG_OPENAI_RESPONSE_LOGGING)) {
+    Logger.log("RESPONSE FROM OPENAI: " + resultText);
+  }
   
  // Remove any possible ```json ... ``` Markdown fences from the response
     if (resultText.indexOf("```") !== -1) {
@@ -180,15 +206,24 @@ function analyzeReceiptWithOpenAI(file) {
         return parsedData.items;
       }
       
-      console.error("OpenAI returned JSON, but it is not an array of receipt items:", resultText);
+      console.error("OpenAI returned JSON, but it is not an array of receipt items.");
+      if (isDebugEnabled(DEBUG_OPENAI_RESPONSE_LOGGING)) {
+        console.error("Raw OpenAI response:", resultText);
+      }
       return [];
     } catch (e) {
-      console.error("Failed to parse JSON from OpenAI. Raw response:", resultText);
+      console.error("Failed to parse JSON from OpenAI.");
+      if (isDebugEnabled(DEBUG_OPENAI_RESPONSE_LOGGING)) {
+        console.error("Raw OpenAI response:", resultText);
+      }
       return [];
     }
   }
 
 function generateWerkbon() {
+  const templateDocId = getRequiredConfigValue(TEMPLATE_DOC_ID, 'TEMPLATE_DOC_ID');
+  const pdfOutputFolderId = getRequiredConfigValue(PDF_OUTPUT_FOLDER_ID, 'PDF_OUTPUT_FOLDER_ID');
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const generalSheet = ss.getSheetByName('Werkbonnen'); 
   
@@ -292,10 +327,8 @@ function generateWerkbon() {
 
 
   console.time("Step 2: Copy the template and open the document");
-  const templateId = '1aldaawk4hW-Cx_onZFizDKZigDKzgh9cL9HDdPGoCqc';
-  const folderId = '1piu-jqQ5hoh1akfS_7632Yp3wT2Ppeze';
   
-  const tempCopy = DriveApp.getFileById(templateId).makeCopy(`Werkbon_${bonId}`, DriveApp.getFolderById(folderId));
+  const tempCopy = DriveApp.getFileById(templateDocId).makeCopy(`Werkbon_${bonId}`, DriveApp.getFolderById(pdfOutputFolderId));
   const tempCopyId = tempCopy.getId();
   const doc = DocumentApp.openById(tempCopyId);
   const body = doc.getBody();
@@ -385,7 +418,7 @@ fillTableRowsFast(matTable, matRows, [
     
     if (response.getResponseCode() === 200) {
       const pdfBlob = response.getBlob().setName(`Werkbon_${bonId}.pdf`);
-      DriveApp.getFolderById(folderId).createFile(pdfBlob);
+      DriveApp.getFolderById(pdfOutputFolderId).createFile(pdfBlob);
       console.timeEnd("Step 7: ULTRA-FAST PDF EXPORT USING DIRECT DOWNLOAD");
     } else {
       throw new Error("The export system returned status code " + response.getResponseCode());
@@ -398,7 +431,7 @@ fillTableRowsFast(matTable, matRows, [
     console.timeEnd("Step 7: ULTRA-FAST PDF EXPORT (FAILED; FALLING BACK TO STANDARD MODE)");
     try {
       const pdfBlob = tempCopy.getAs(MimeType.PDF);
-      DriveApp.getFolderById(folderId).createFile(pdfBlob).setName(`Werkbon_${bonId}.pdf`);
+      DriveApp.getFolderById(pdfOutputFolderId).createFile(pdfBlob).setName(`Werkbon_${bonId}.pdf`);
       tempCopy.setTrashed(true);
       ss.toast(`Generated successfully (standard mode).`);
     } catch(err) {
@@ -408,7 +441,8 @@ fillTableRowsFast(matTable, matRows, [
 }
 
 function runFullWorkflow() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheetId = getRequiredConfigValue(SPREADSHEET_ID, 'SPREADSHEET_ID');
+  const ss = SpreadsheetApp.openById(spreadsheetId);
 
   try {
     console.log("=== START FULL WERKBON PROCESS ===");
