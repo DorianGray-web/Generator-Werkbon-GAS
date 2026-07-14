@@ -316,7 +316,7 @@ Sample PDF:
 
 - [x] Modular project structure
 - [x] Secure configuration validation
-- [ ] Automated tests for pure helper functions
+- [x] Automated tests for core helper and parsing functions
 - [ ] Batch receipt processing
 - [ ] Multiple document templates
 - [ ] Multi-language support
