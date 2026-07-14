@@ -56,16 +56,14 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ### Validation
 
-### Validation
-
-- Tested the modular version in an isolated copy of the Google Sheets workflow.
-- Reprocessed an existing receipt by removing the `[Recognized]` marker in the test environment.
-- Confirmed OpenAI receipt recognition and material extraction.
-- Confirmed extracted materials were added to the corresponding Werkbon data.
-- Confirmed Google Docs template population.
-- Confirmed successful PDF generation to a dedicated test output folder.
-- Verified that the recognized receipt materials were present in the final generated PDF.
-- Confirmed the complete `runFullWorkflow()` workflow.
+- Tested v1.7.0 in an isolated copy of the production-like Google Sheets environment
+- Used a separate Spreadsheet ID, Google Docs template copy, and dedicated PDF output folder
+- Reused only the existing receipt image source folder from the previous v1.6 workflow
+- Reprocessed an existing JPEG receipt by resetting its `[Recognized]` processing marker
+- Confirmed successful OpenAI Vision receipt recognition and material extraction
+- Verified extracted materials were written to the Werkbon data
+- Confirmed Google Docs template population and successful PDF generation
+- Verified the recognized receipt materials were present in the final generated PDF
 
 
 ## [1.6.0] - 2026-07-06
