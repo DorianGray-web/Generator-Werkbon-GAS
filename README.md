@@ -222,7 +222,48 @@ Testing on completed historical records is recommended before deploying updates 
 
 ---
 
+## Testing
+
+The project includes a QUnitGS2 test suite for pure and business-logic helpers.
+
+Current test coverage includes:
+
+- configuration validation
+- Werkbon ID normalization
+- currency and date formatting
+- in-memory row filtering
+- location lookup and fallback behavior
+- working-hours calculation
+- Werkbon row lookup
+- multiline description aggregation
+- OpenAI receipt response parsing
+
+Current test suite:
+
+- 22 tests
+- 45 assertions
+- 45 passed
+- 0 failed
+
+The complete receipt-to-PDF workflow was also validated separately in an isolated Google Workspace environment using:
+
+- a copied Google Sheet
+- a copied Google Docs template
+- a dedicated PDF output folder
+- an existing receipt reprocessed through OpenAI Vision
+
+The validation confirmed material extraction, Werkbon data updates, document population, and final PDF generation.
+
+---
+
 ## 📸 Screenshots
+
+### Automated Test Results
+
+![screenshots/qunit-v1.7-tests](screenshots/Screenshot%202026-07-14%20205954.png)
+
+**22 tests · 45 assertions · 45 passed · 0 failed**
+
 
 ### Google Sheets
 
