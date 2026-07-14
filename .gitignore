@@ -1,0 +1,9 @@
+.env
+.env.*
+.clasp.json
+
+*.log
+processed.log
+
+.DS_Store
+Thumbs.db
