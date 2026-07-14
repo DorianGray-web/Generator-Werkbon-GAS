@@ -15,6 +15,20 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.7.1] - 2026-07-14
+
+### Added
+
+- Added QUnitGS2 test suite for configuration, formatting, data helpers, Werkbon logic, and OpenAI response parsing.
+- Added 22 tests with 45 assertions.
+- Added test result screenshot to project documentation.
+
+### Validation
+
+- All 45 assertions passed successfully.
+
+---
+
 ## [1.7.0] - 2026-07-14
 
 ### Added
