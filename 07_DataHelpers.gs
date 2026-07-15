@@ -4,7 +4,7 @@
 
 function filterDataInMemory(dataMatrix, id) {
   if (!dataMatrix || dataMatrix.length === 0) {
-    console.log('Warning: An empty data array was provided for filtering.');
+    console.log('No data rows available for filtering.');
     return [];
   }
 
