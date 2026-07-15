@@ -41,11 +41,23 @@ function analyzeReceiptWithOpenAI(file) {
 
 function buildOpenAIReceiptPayload(mimeType, base64Data) {
   const systemPrompt =
-    'You are a professional AI parser for construction delivery notes, invoices, and receipts. ' +
-    'Your task is to analyze the image and extract ALL construction materials, tools, and consumables. ' +
-    'Ignore the receipt total, taxes (BTW/VAT), discounts, delivery fees, returnable packaging, and pallet deposits. ' +
-    'Return the result STRICTLY as a valid JSON array of objects, without Markdown formatting (no ```json ... ```). ' +
-    'Response format: [{"name": "Exact product name in the receipt language", "quantity": numeric_quantity, "price": numeric_unit_price}]';
+  'You are a professional AI parser for construction delivery notes, invoices, and receipts. ' +
+  'Your task is to analyze the image and extract ALL purchased construction materials, tools, and consumables. ' +
+
+  'The "quantity" field MUST represent the number of purchased sales units shown on the receipt. ' +
+  'A sales unit may be an individual item, package, box, roll, bottle, tube, bag, or other sold unit. ' +
+  'DO NOT use package contents, product dimensions, length, volume, weight, or piece count inside a package as the purchased quantity. ' +
+
+  'For example, if one package contains 100 plugs and one package was purchased, quantity MUST be 1, not 100. ' +
+  'If a roll contains 50 metres of sealing thread and one roll was purchased, quantity MUST be 1, not 50. ' +
+  'Keep package size, dimensions, length, volume, weight, and piece count as part of the product name when they appear on the receipt. ' +
+
+  'The "price" field MUST represent the unit price of the purchased sales unit, not the calculated price of one piece inside a package. ' +
+
+  'Ignore the receipt total, taxes (BTW/VAT), discounts, delivery fees, returnable packaging, and pallet deposits. ' +
+
+  'Return the result STRICTLY as a valid JSON array of objects, without Markdown formatting (no ```json ... ```). ' +
+  'Response format: [{"name": "Exact product name in the receipt language", "quantity": numeric_purchased_sales_unit_quantity, "price": numeric_sales_unit_price}]';
 
   return {
     model: OPENAI.model,
@@ -81,15 +93,15 @@ function parseOpenAIReceiptResponse(responseText) {
     const parsedData = JSON.parse(resultText);
 
     if (Array.isArray(parsedData)) {
-      return parsedData;
+  return validateReceiptItems(parsedData);
     }
 
     if (parsedData.materials && Array.isArray(parsedData.materials)) {
-      return parsedData.materials;
+  return validateReceiptItems(parsedData.materials);
     }
 
     if (parsedData.items && Array.isArray(parsedData.items)) {
-      return parsedData.items;
+  return validateReceiptItems(parsedData.items);
     }
 
     console.error('OpenAI returned JSON, but it is not an array of receipt items.');
@@ -100,6 +112,52 @@ function parseOpenAIReceiptResponse(responseText) {
     logRawOpenAIResponseForDebug(resultText);
     return [];
   }
+}
+
+function validateReceiptItems(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const validItems = [];
+
+  items.forEach(function(item, index) {
+    if (!item || typeof item !== 'object') {
+      console.log(`Receipt item #${index + 1} skipped: invalid item structure.`);
+      return;
+    }
+
+    const name = String(item.name || '').trim();
+    const quantity = Number(item.quantity);
+    const price = Number(item.price);
+
+    if (name === '') {
+      console.log(`Receipt item #${index + 1} skipped: empty product name.`);
+      return;
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      console.log(
+        `Receipt item #${index + 1} skipped: invalid quantity for "${name}".`
+      );
+      return;
+    }
+
+    if (!Number.isFinite(price) || price < 0) {
+      console.log(
+        `Receipt item #${index + 1} skipped: invalid price for "${name}".`
+      );
+      return;
+    }
+
+    validItems.push({
+      name: name,
+      quantity: quantity,
+      price: price,
+    });
+  });
+
+  return validItems;
 }
 
 function logRawOpenAIResponseForDebug(resultText) {

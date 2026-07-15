@@ -222,12 +222,25 @@ Testing on completed historical records is recommended before deploying updates 
 
 ---
 
+## Receipt Reliability
+
+Version 1.7.2 improves receipt reprocessing and material validation.
+
+- Purchased quantity is interpreted as the number of sales units, not package contents.
+- OpenAI receipt items are validated before being written to Google Sheets.
+- Reprocessing a receipt replaces existing materials for the selected Werkbon instead of appending duplicates.
+- Incomplete material rows are excluded from generated PDFs.
+
+---
+
 ## Testing
 
 The project includes a QUnitGS2 test suite for pure and business-logic helpers.
 
 Current test coverage includes:
 
+- OpenAI receipt item validation
+- incomplete material row filtering
 - configuration validation
 - Werkbon ID normalization
 - currency and date formatting
@@ -240,9 +253,9 @@ Current test coverage includes:
 
 Current test suite:
 
-- 22 tests
-- 45 assertions
-- 45 passed
+- 23 tests
+- 46 assertions
+- 46 passed
 - 0 failed
 
 The complete receipt-to-PDF workflow was also validated separately in an isolated Google Workspace environment using:
@@ -262,7 +275,9 @@ The validation confirmed material extraction, Werkbon data updates, document pop
 
 ![screenshots/qunit-v1.7-tests](screenshots/Screenshot%202026-07-14%20205954.png)
 
-**22 tests · 45 assertions · 45 passed · 0 failed**
+![QUnitGS2 v1.7.2 test results](screenshots/qunit-v1.7.2-tests.png)
+
+**23 tests · 46 assertions · 46 passed · 0 failed**
 
 
 ### Google Sheets
@@ -316,12 +331,12 @@ Sample PDF:
 
 - [x] Modular project structure
 - [x] Secure configuration validation
-- [ ] Automated tests for pure helper functions
+- [x] Automated tests for core helper and parsing functions
 - [ ] Batch receipt processing
 - [ ] Multiple document templates
 - [ ] Multi-language support
 - [ ] OCR fallback mode
-- [ ] AI response validation layer
+- [x] AI response validation layer
 - [ ] Structured error reporting
 - [ ] REST API integration
 

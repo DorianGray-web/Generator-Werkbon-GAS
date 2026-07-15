@@ -15,6 +15,36 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.7.2] - 2026-07-15
+
+### Changed
+
+- Clarified the OpenAI receipt parsing prompt to distinguish purchased sales-unit quantities from package contents, dimensions, length, volume, weight, and internal piece counts.
+- Updated receipt price interpretation to use the price of the purchased sales unit.
+- Changed receipt reprocessing to replace existing materials for the target Werkbon instead of blindly appending duplicate rows.
+
+### Added
+
+- Added validation for OpenAI receipt items before materials are written to the spreadsheet.
+- Added filtering of incomplete material rows before Werkbon document generation.
+- Added test coverage for incomplete material row filtering.
+
+### Fixed
+
+- Prevented duplicated material rows when a receipt is reprocessed.
+- Prevented incomplete material rows containing only a Werkbon ID from appearing as empty `€ 0,00` rows in generated PDFs.
+- Prevented invalid receipt item values from being written to the materials sheet.
+
+### Validation
+
+- Successfully reprocessed an existing receipt multiple times for the same Werkbon.
+- Confirmed existing materials are replaced with the latest validated receipt result.
+- Confirmed incomplete material rows are excluded from generated Werkbon PDFs.
+- Confirmed successful Google Docs population and PDF generation.
+- All 46 QUnitGS2 assertions passed successfully.
+
+---
+
 ## [1.7.1] - 2026-07-14
 
 ### Added
