@@ -39,7 +39,7 @@ function processNewReceipts() {
     const materials = analyzeReceiptWithOpenAI(fileToProcess);
     console.log('The AI successfully returned this many items: ' + (materials ? materials.length : 0));
 
-    appendMaterialsToSheet(matSheet, bonId, materials);
+    replaceMaterialsForWerkbon(matSheet, bonId, materials);
 
     fileToProcess.setName(RECEIPTS.processedPrefix + originalName);
     console.log(
@@ -134,21 +134,49 @@ function findNextReceiptImage(receiptsFolderId) {
   return null;
 }
 
-function appendMaterialsToSheet(matSheet, bonId, materials) {
-  if (!materials || materials.length === 0) {
-    console.log('No material rows were returned by OpenAI.');
-    return;
+function replaceMaterialsForWerkbon(matSheet, bonId, materials) {
+  const validMaterials = validateReceiptItems(materials);
+
+  if (validMaterials.length === 0) {
+    throw new Error(
+      `No valid material rows were returned for Werkbon ${bonId}.`
+    );
   }
 
-  materials.forEach(function(item) {
-    matSheet.appendRow([
+  const targetId = cleanId(bonId);
+  const lastRow = matSheet.getLastRow();
+  const lastColumn = Math.max(matSheet.getLastColumn(), 5);
+
+  // Delete existing rows for this Werkbon from bottom to top.
+  for (let rowIndex = lastRow; rowIndex >= 2; rowIndex--) {
+    const existingId = cleanId(
+      matSheet.getRange(rowIndex, 1).getValue()
+    );
+
+    if (existingId === targetId) {
+      matSheet.deleteRow(rowIndex);
+    }
+  }
+
+  const newRows = validMaterials.map(function(item) {
+    return [
       bonId,
       item.name,
-      Number(item.price),
-      Number(item.quantity),
-      Number(item.quantity * item.price),
-    ]);
+      item.price,
+      item.quantity,
+      item.quantity * item.price,
+    ];
   });
+
+  const startRow = matSheet.getLastRow() + 1;
+
+  matSheet
+    .getRange(startRow, 1, newRows.length, 5)
+    .setValues(newRows);
+
+  console.log(
+    `Replaced materials for ${bonId}. Added rows: ${newRows.length}.`
+  );
 }
 
 

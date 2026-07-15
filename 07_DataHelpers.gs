@@ -4,7 +4,7 @@
 
 function filterDataInMemory(dataMatrix, id) {
   if (!dataMatrix || dataMatrix.length === 0) {
-    console.log('Warning: An empty data array was provided for filtering.');
+    console.log('No data rows available for filtering.');
     return [];
   }
 
@@ -28,6 +28,31 @@ function filterDataInMemory(dataMatrix, id) {
 
   console.log(`=== FULL-DATASET FILTERING FINISHED. MATCHED ROWS: ${filtered.length} ===`);
   return filtered;
+}
+
+function filterCompleteMaterialRows(rows) {
+  return rows.filter(function(row) {
+    const name = String(row[1] || '').trim();
+    const rawPrice = row[2];
+    const rawQuantity = row[3];
+
+    const price = Number(rawPrice);
+    const quantity = Number(rawQuantity);
+
+    return (
+      name !== '' &&
+      rawPrice !== '' &&
+      rawPrice !== null &&
+      rawPrice !== undefined &&
+      Number.isFinite(price) &&
+      price >= 0 &&
+      rawQuantity !== '' &&
+      rawQuantity !== null &&
+      rawQuantity !== undefined &&
+      Number.isFinite(quantity) &&
+      quantity > 0
+    );
+  });
 }
 
 function cleanId(value) {

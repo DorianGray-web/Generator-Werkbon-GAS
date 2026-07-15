@@ -177,6 +177,25 @@ function doGet() {
   );
 
   // ==================================================
+  // filterCompleteMaterialRows
+  // ==================================================
+
+  QUnit.test("filterCompleteMaterialRows — removes incomplete material rows", function(assert) {
+    const rows = [
+      ['ENG-001', 'Paint', 12.5, 2, 25],
+      ['ENG-001', '', 5, 1, 5],
+      ['ENG-001', 'Brush', '', 1, ''],
+      ['ENG-001', 'Tape', 3, '', ''],
+    ];
+
+    const result = filterCompleteMaterialRows(rows);
+
+    assert.deepEqual(result, [
+      ['ENG-001', 'Paint', 12.5, 2, 25],
+    ]);
+  });
+
+  // ==================================================
   // getLocatieDataFast()
   // ==================================================
 
