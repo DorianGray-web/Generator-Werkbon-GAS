@@ -299,6 +299,15 @@ The validation confirmed material extraction, Werkbon data updates, document pop
 
 *Historical v1.7.2 test run. Current v1.7.3 test totals will be published after the updated suite is executed.*
 
+![QUnitGS2 v1.7.3 test results](screenshots/qunit-v1.7.3-tests.png)
+
+Current test suite:
+
+- 34 tests
+- 79 assertions
+- 79 passed
+- 0 failed
+
 ### Google Sheets
 
 ![Google Sheets Interface 1](screenshots/screenshot%20%202026-07-07%20011638.png)
@@ -388,3 +397,4 @@ https://github.com/DorianGray-web
 ---
 
 ⭐ If you find this project useful, consider giving it a star!
+
