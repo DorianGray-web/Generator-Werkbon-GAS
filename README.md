@@ -7,7 +7,7 @@
 ![Architecture](https://img.shields.io/badge/Architecture-Modular-blueviolet)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
-![Release](https://img.shields.io/badge/Release-v1.7.2-blue)
+![Release](https://img.shields.io/badge/Release-v1.7.3-blue)
 
 ---
 
@@ -35,8 +35,13 @@ The project was developed to reduce repetitive administrative work and demonstra
 ## ✨ Features
 
 - AI receipt recognition using OpenAI GPT-4o Vision
-- Automatic processing of receipt images
-- Material extraction: name, quantity and price
+- Automatic processing of multiple receipts for a single Werkbon
+- Multi-line receipt item reconstruction
+- Material extraction: name, quantity, unit price and line total
+- Recognition of shipping costs and additional fees
+- Filtering of discounts, loyalty rewards and payment metadata
+- Receipt-level document total handling (incl. VAT)
+- Receipt isolation to prevent one receipt from overwriting another
 - Google Sheets integration
 - Google Docs template processing
 - Automatic PDF generation
@@ -53,21 +58,29 @@ The project was developed to reduce repetitive administrative work and demonstra
 ## 🔄 Workflow
 
 ```text
-Receipt Image
-      │
-      ▼
+Receipt / Invoice Image
+        │
+        ▼
 OpenAI GPT-4o Vision
-      │
-      ▼
-Material Recognition
-      │
-      ▼
+        │
+        ▼
+Structured Receipt Extraction
+        │
+        ▼
+Validation & Normalization
+        │
+        ├── Materials
+        ├── Shipping
+        ├── Additional Fees
+        └── Document Total (incl. VAT)
+        │
+        ▼
 Google Sheets
-      │
-      ▼
+        │
+        ▼
 Google Docs Template
-      │
-      ▼
+        │
+        ▼
 PDF Work Order
 ```
 
@@ -224,11 +237,17 @@ Testing on completed historical records is recommended before deploying updates 
 
 ## Receipt Reliability
 
-Version 1.7.2 improves receipt reprocessing and material validation.
+Version 1.7.3 extends the receipt-processing reliability layer introduced in v1.7.2.
 
+- Multi-line product descriptions are reconstructed into a single material item.
+- Multiple receipts can be processed for the same Werkbon without overwriting each other.
+- Each processed receipt is isolated using a stable `receiptKey`.
 - Purchased quantity is interpreted as the number of sales units, not package contents.
-- OpenAI receipt items are validated before being written to Google Sheets.
-- Reprocessing a receipt replaces existing materials for the selected Werkbon instead of appending duplicates.
+- Shipping costs and additional fees are recognized and included when they represent actual expenses.
+- Discounts, loyalty rewards and payment metadata are excluded from Werkbon material costs.
+- Supplier-printed expense values are preserved without redistributing VAT across individual rows.
+- The printed document total including VAT is stored once per receipt/invoice and used for receipt-level total calculation.
+- Legacy material rows without a `receiptKey` remain supported.
 - Incomplete material rows are excluded from generated PDFs.
 
 ---
@@ -250,13 +269,14 @@ Current test coverage includes:
 - Werkbon row lookup
 - multiline description aggregation
 - OpenAI receipt response parsing
-
-Current test suite:
-
-- 23 tests
-- 46 assertions
-- 46 passed
-- 0 failed
+- multi-line receipt item reconstruction
+- multiple receipts per Werkbon
+- receiptKey isolation
+- additional-cost classification and aggregation
+- discount and payment metadata filtering
+- receipt-level incl. VAT totals
+- grouped material total calculation
+- legacy material-row compatibility
 
 The complete receipt-to-PDF workflow was also validated separately in an isolated Google Workspace environment using:
 
@@ -277,8 +297,7 @@ The validation confirmed material extraction, Werkbon data updates, document pop
 
 ![QUnitGS2 v1.7.2 test results](screenshots/qunit-v1.7.2-tests.png)
 
-**23 tests · 46 assertions · 46 passed · 0 failed**
-
+*Historical v1.7.2 test run. Current v1.7.3 test totals will be published after the updated suite is executed.*
 
 ### Google Sheets
 
@@ -332,7 +351,8 @@ Sample PDF:
 - [x] Modular project structure
 - [x] Secure configuration validation
 - [x] Automated tests for core helper and parsing functions
-- [ ] Batch receipt processing
+- [x] Multiple receipts per Werkbon
+- [ ] Multi-Werkbon batch receipt processing
 - [ ] Multiple document templates
 - [ ] Multi-language support
 - [ ] OCR fallback mode
