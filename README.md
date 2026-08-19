@@ -297,7 +297,7 @@ The validation confirmed material extraction, Werkbon data updates, document pop
 
 ![QUnitGS2 v1.7.2 test results](screenshots/qunit-v1.7.2-tests.png)
 
-*Historical v1.7.2 test run. Current v1.7.3 test totals will be published after the updated suite is executed.*
+*Historical v1.7.2 test run retained for reference.*
 
 ![QUnitGS2 v1.7.3 test results](screenshots/qunit-v1.7.3-tests.png)
 
