@@ -430,76 +430,39 @@ function doGet() {
   );
 
   // ==================================================
-  // parseOpenAIReceiptResponse()
+  // parseOpenAIReceiptResponse() - updated for structured return
   // ==================================================
 
   QUnit.test(
-    'parseOpenAIReceiptResponse — parses direct material array',
+    'parseOpenAIReceiptResponse — returns structured object with items',
     function (assert) {
       const materials = [
-        {
-          name: 'Primer',
-          quantity: 2,
-          price: 12.5
-        }
+        { name: 'Primer', quantity: 2, price: 12.5 }
       ];
 
-      const response = createMockOpenAIResponse(
-        JSON.stringify(materials)
-      );
+      const response = createMockOpenAIResponse(JSON.stringify(materials));
 
-      assert.deepEqual(
-        parseOpenAIReceiptResponse(response),
-        materials
-      );
+      const result = parseOpenAIReceiptResponse(response);
+      assert.ok(Array.isArray(result.items));
+      assert.deepEqual(result.items, [
+        { name: 'Primer', quantity: 2, unitPrice: 12.5, lineTotal: 25, price: 12.5 }
+      ]);
+      assert.deepEqual(result.additionalCosts, []);
     }
   );
 
   QUnit.test(
     'parseOpenAIReceiptResponse — accepts materials wrapper',
     function (assert) {
-      const materials = [
-        {
-          name: 'Paint',
-          quantity: 1,
-          price: 35
-        }
-      ];
+      const materials = [{ name: 'Paint', quantity: 1, price: 35 }];
 
       const response = createMockOpenAIResponse(
-        JSON.stringify({
-          materials: materials
-        })
+        JSON.stringify({ materials: materials })
       );
 
-      assert.deepEqual(
-        parseOpenAIReceiptResponse(response),
-        materials
-      );
-    }
-  );
-
-  QUnit.test(
-    'parseOpenAIReceiptResponse — accepts items wrapper',
-    function (assert) {
-      const items = [
-        {
-          name: 'Brush',
-          quantity: 3,
-          price: 4.5
-        }
-      ];
-
-      const response = createMockOpenAIResponse(
-        JSON.stringify({
-          items: items
-        })
-      );
-
-      assert.deepEqual(
-        parseOpenAIReceiptResponse(response),
-        items
-      );
+      const result = parseOpenAIReceiptResponse(response);
+      assert.equal(result.items.length, 1);
+      assert.equal(result.items[0].name, 'Paint');
     }
   );
 
@@ -512,16 +475,227 @@ function doGet() {
         '```'
       );
 
-      assert.deepEqual(
-        parseOpenAIReceiptResponse(response),
-        [
+      const result = parseOpenAIReceiptResponse(response);
+      assert.equal(result.items[0].name, 'Primer');
+    }
+  );
+
+  QUnit.test(
+    'parseOpenAIReceiptResponse — accepts multi-line items with unitPrice and lineTotal',
+    function (assert) {
+      const response = createMockOpenAIResponse(
+        JSON.stringify([
           {
-            name: 'Primer',
+            name: 'Schüt Aqua2save handd 4stnd wstop chr',
             quantity: 1,
-            price: 10
+            unitPrice: 16.99,
+            lineTotal: 16.99
+          },
+          {
+            name: 'Saniv plugbekersifon 5/4x32mm chr',
+            quantity: 2,
+            unitPrice: 29.89,
+            lineTotal: 59.78
           }
-        ]
+        ])
       );
+
+      const result = parseOpenAIReceiptResponse(response);
+      assert.equal(result.items.length, 2);
+      assert.equal(result.items[0].price, 16.99);
+      assert.equal(result.items[1].price, 29.89);
+    }
+  );
+
+  // ==================================================
+  // normalizeAndAggregateReceiptData()
+  // ==================================================
+
+  QUnit.test(
+    'normalizeAndAggregateReceiptData — keeps product items as printed (no per-line VAT)',
+    function (assert) {
+      const raw = {
+        items: [
+          { name: 'Lamp', quantity: 2, unitPrice: 4.60, lineTotal: 9.20 }
+        ],
+        additionalCosts: [],
+        vat: { rate: 0.21, amount: 3.00 },
+        totals: { exclVAT: 14.29, inclVAT: 17.29 }
+      };
+
+      const result = normalizeAndAggregateReceiptData(raw);
+
+      assert.equal(result.rows.length, 1);
+      assert.equal(result.rows[0].name, 'Lamp');
+      assert.equal(result.rows[0].price, 4.60);
+      // Total should still be based on printed product value
+      assert.ok(Math.abs(result.finalSum - 9.20) < 0.01);
+      assert.equal(result.documentTotalInclVat, 17.29);
+    }
+  );
+
+  QUnit.test(
+    'normalizeAndAggregateReceiptData — aggregates fees and shipping using printed amounts (no cross-category VAT)',
+    function (assert) {
+      const raw = {
+        items: [
+          { name: 'Material', quantity: 1, unitPrice: 9.20, lineTotal: 9.20 }
+        ],
+        additionalCosts: [
+          { name: 'Verwijderingsbijdrage', type: 'fee', amount: 0.14 },
+          { name: 'Vrachtkosten', type: 'shipping', amount: 4.95 }
+        ],
+        vat: { rate: 0.21, amount: 3.00 },
+        totals: { exclVAT: 14.29, inclVAT: 17.29 }
+      };
+
+      const result = normalizeAndAggregateReceiptData(raw);
+
+      // Should have 1 material + 2 aggregated rows
+      assert.equal(result.rows.length, 3);
+
+      const toeslagen = result.rows.find(r => r.name === 'Toeslagen');
+      const vracht = result.rows.find(r => r.name === 'Vrachtkosten');
+
+      assert.ok(toeslagen, 'Toeslagen row should exist');
+      assert.ok(vracht, 'Vrachtkosten row should exist');
+
+      // Must use printed amounts — no VAT from materials may be given to additional categories
+      assert.ok(Math.abs(toeslagen.price - 0.14) < 0.01);
+      assert.ok(Math.abs(vracht.price - 4.95) < 0.01);
+
+      // Final sum uses printed values (reconciles to exclVAT when available)
+      assert.ok(Math.abs(result.finalSum - 14.29) < 0.01);
+      assert.ok(result.reconciled);
+      assert.equal(result.documentTotalInclVat, 17.29);
+    }
+  );
+
+  QUnit.test(
+    'normalizeAndAggregateReceiptData — excludes discounts and payment metadata',
+    function (assert) {
+      const raw = {
+        items: [{ name: 'Screw', quantity: 10, unitPrice: 0.5, lineTotal: 5.00 }],
+        additionalCosts: [
+          { name: 'Korting', type: 'discount_or_reward', amount: -2.00 }, // should be ignored
+          { name: 'Reeds betaald', type: 'payment_information', amount: 10.00 }
+        ],
+        vat: null,
+        totals: { inclVAT: 5.00 }
+      };
+
+      const result = normalizeAndAggregateReceiptData(raw);
+
+      assert.equal(result.rows.length, 1);
+      assert.equal(result.rows[0].name, 'Screw');
+      assert.equal(result.documentTotalInclVat, 5.00);
+    }
+  );
+
+  QUnit.test(
+    'normalizeAndAggregateReceiptData — fails reconciliation when totals cannot be matched',
+    function (assert) {
+      const raw = {
+        items: [{ name: 'Item', quantity: 1, unitPrice: 10, lineTotal: 10 }],
+        additionalCosts: [],
+        vat: { amount: 2 },
+        totals: { inclVAT: 999.99 }   // deliberately wrong
+      };
+
+      const result = normalizeAndAggregateReceiptData(raw);
+
+      assert.notOk(result.reconciled);
+    }
+  );
+
+  QUnit.test(
+    'stripQuantityPrefix — removes leading quantity from names',
+    function (assert) {
+      assert.equal(stripQuantityPrefix('1 Tiger doucheglijstang chr'), 'Tiger doucheglijstang chr');
+      assert.equal(stripQuantityPrefix('2x LED bulb'), 'LED bulb');
+      assert.equal(stripQuantityPrefix('10 - Screw set'), 'Screw set');
+      assert.equal(stripQuantityPrefix('CorePro LED'), 'CorePro LED');
+      assert.equal(stripQuantityPrefix('  3×  Item '), 'Item');
+    }
+  );
+
+  // ==================================================
+  // calculateMaterialTotalFromRows() - new for column G support
+  // ==================================================
+
+  QUnit.test(
+    'calculateMaterialTotalFromRows — legacy rows (no receiptKey) use column E',
+    function (assert) {
+      const rows = [
+        ['ID', 'Item1', 10, 1, 10, '', ''],           // no receiptKey, use E=10
+        ['ID', 'Item2', 20, 1, 20, '', '']            // no receiptKey, use E=20
+      ];
+
+      assert.equal(calculateMaterialTotalFromRows(rows), 30);
+    }
+  );
+
+  QUnit.test(
+    'calculateMaterialTotalFromRows — uses G when present (only once)',
+    function (assert) {
+      const rows = [
+        ['ID', 'Item1', 10, 1, 10, 'REC-001', ''],
+        ['ID', 'Item2', 15, 1, 15, 'REC-001', 44.28]   // G on last row
+      ];
+
+      assert.equal(calculateMaterialTotalFromRows(rows), 44.28);
+    }
+  );
+
+  QUnit.test(
+    'calculateMaterialTotalFromRows — falls back to SUM(E) when no G for receiptKey',
+    function (assert) {
+      const rows = [
+        ['ID', 'Item1', 10, 1, 10, 'REC-001', ''],
+        ['ID', 'Item2', 15, 1, 15, 'REC-001', '']
+      ];
+
+      assert.equal(calculateMaterialTotalFromRows(rows), 25);
+    }
+  );
+
+  QUnit.test(
+    'calculateMaterialTotalFromRows — mixed legacy + receiptKey groups',
+    function (assert) {
+      const rows = [
+        ['ID', 'Legacy', 5, 1, 5, '', ''],            // legacy
+        ['ID', 'Mat1', 10, 1, 10, 'REC-001', ''],
+        ['ID', 'Mat2', 12, 1, 12, 'REC-001', 22.5]    // G wins for group
+      ];
+
+      assert.equal(calculateMaterialTotalFromRows(rows), 5 + 22.5);
+    }
+  );
+
+  QUnit.test(
+    'calculateMaterialTotalFromRows — identical duplicate G logs warning and uses once',
+    function (assert) {
+      const rows = [
+        ['ID', 'A', 10, 1, 10, 'REC-DUP', 30],
+        ['ID', 'B', 20, 1, 20, 'REC-DUP', 30]
+      ];
+
+      // Should use 30 once
+      assert.equal(calculateMaterialTotalFromRows(rows), 30);
+    }
+  );
+
+  QUnit.test(
+    'calculateMaterialTotalFromRows — conflicting G values logs error and does not silently choose',
+    function (assert) {
+      const rows = [
+        ['ID', 'A', 10, 1, 10, 'REC-CONF', 30],
+        ['ID', 'B', 20, 1, 20, 'REC-CONF', 35]
+      ];
+
+      // Falls back to eSum (30) because of conflict
+      const result = calculateMaterialTotalFromRows(rows);
+      assert.equal(result, 30);
     }
   );
 
