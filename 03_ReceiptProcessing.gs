@@ -204,9 +204,10 @@ function normalizeAndAggregateReceiptData(rawData) {
 
     if (cost.type === 'shipping') {
       shippingTotal += amt;
-    } else {
+    } else if (cost.type === 'fee') {
       feeTotal += amt;
     }
+    // else: ignore discount_or_reward, payment_information, unknown
   });
 
   const materialSum = materialRows.reduce(function(sum, r) {
@@ -299,7 +300,8 @@ function roundToCents(value) {
 function stripQuantityPrefix(name) {
   const str = String(name || '').trim();
   // Matches patterns like: 1 , 2x , 10- , 3× , 5. etc. at the start
-  return str.replace(/^\d+[\s\x\-–—xX\*\.]+/, '').trim();
+  // Explicitly supports Unicode × (multiplication sign)
+  return str.replace(/^\d+[\s\u00D7×\-\–—xX\*\.]+/, '').trim();
 }
 
 function mergeMultiLineReceiptItems(items) {

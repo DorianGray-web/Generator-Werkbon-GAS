@@ -116,17 +116,7 @@ function parseOpenAIReceiptResponse(responseText) {
   try {
     const parsedData = JSON.parse(resultText);
 
-    // New structured format
-    if (parsedData && typeof parsedData === 'object' && !Array.isArray(parsedData)) {
-      return {
-        items: validateReceiptItems(parsedData.items || []),
-        additionalCosts: validateAdditionalCosts(parsedData.additionalCosts || []),
-        vat: parsedData.vat || null,
-        totals: parsedData.totals || null
-      };
-    }
-
-    // Backward compatibility: old flat array
+    // 1. Legacy flat array [...]
     if (Array.isArray(parsedData)) {
       return {
         items: validateReceiptItems(parsedData),
@@ -136,7 +126,8 @@ function parseOpenAIReceiptResponse(responseText) {
       };
     }
 
-    if (parsedData.materials && Array.isArray(parsedData.materials)) {
+    // 2. Legacy { materials: [...] }
+    if (parsedData && parsedData.materials && Array.isArray(parsedData.materials)) {
       return {
         items: validateReceiptItems(parsedData.materials),
         additionalCosts: [],
@@ -145,12 +136,13 @@ function parseOpenAIReceiptResponse(responseText) {
       };
     }
 
-    if (parsedData.items && Array.isArray(parsedData.items)) {
+    // 3. Current structured { items, additionalCosts, vat, totals }
+    if (parsedData && typeof parsedData === 'object' && !Array.isArray(parsedData)) {
       return {
-        items: validateReceiptItems(parsedData.items),
-        additionalCosts: [],
-        vat: null,
-        totals: null
+        items: validateReceiptItems(parsedData.items || []),
+        additionalCosts: validateAdditionalCosts(parsedData.additionalCosts || []),
+        vat: parsedData.vat || null,
+        totals: parsedData.totals || null
       };
     }
 
@@ -240,12 +232,16 @@ function validateAdditionalCosts(additionalCosts) {
       return;
     }
 
-    // Normalize type
-    let normalizedType = 'fee';
+    // Normalize type - strict whitelist: shipping or fee only
+    let normalizedType = null;
     if (type.indexOf('ship') !== -1 || type.indexOf('vracht') !== -1 || type.indexOf('bezorg') !== -1) {
       normalizedType = 'shipping';
     } else if (type.indexOf('fee') !== -1 || type.indexOf('toeslag') !== -1 || type.indexOf('bijdrage') !== -1) {
       normalizedType = 'fee';
+    }
+
+    if (normalizedType === null) {
+      return; // ignore discount_or_reward, payment_information, unknown
     }
 
     valid.push({
