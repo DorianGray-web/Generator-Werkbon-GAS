@@ -100,9 +100,11 @@ function loadRelatedWerkbonRows(ss, bonId) {
   const rawMatRows = getSheetDataOrEmpty(matSheet, false);
   const rawAanvRows = getSheetDataOrEmpty(aanvSheet, false);
 
+  const matRows = filterDataInMemory(rawMatRows, bonId);
+
   return {
     urenRows: filterDataInMemory(rawUrenRows, bonId),
-    matRows: filterDataInMemory(rawMatRows, bonId),
+    matRows: filterCompleteMaterialRows(matRows || []),
     aanvullingenRows: filterDataInMemory(rawAanvRows, bonId),
   };
 }
@@ -156,7 +158,7 @@ function populateWerkbonDocument(body, context) {
   body.replaceText('{{Postcode}}', context.locatieData.postcode);
   body.replaceText('{{Woonplaats}}', context.locatieData.woonplaats);
 
-  const totalMateriaal = context.matRows.reduce((sum, row) => sum + (Number(row[4]) || 0), 0);
+  const totalMateriaal = calculateMaterialTotalFromRows(context.matRows);
   body.replaceText('{{TotalMateriaal}}', formatEuro(totalMateriaal));
   console.timeEnd('Step 3: Replace individual text tags');
 
@@ -185,6 +187,8 @@ function populateWerkbonTables(body, urenRows, matRows) {
     throw new Error('The document template must contain at least four tables.');
   }
 
+  console.log(`Populating tables - Uren rows: ${urenRows.length}, Materials rows: ${matRows.length}`);
+
   fillTableRowsFast(tables[DOCUMENT_TABLE_INDEX.uren], urenRows, [
     { tag: '{{u_datum}}', col: 1, cellIndex: 0 },
     { tag: '{{u_hours}}', col: 4, cellIndex: 1 },
@@ -197,6 +201,7 @@ function populateWerkbonTables(body, urenRows, matRows) {
     { tag: '{{m_price}}', col: 2, cellIndex: 1, isEuro: true },
     { tag: '{{m_qty}}', col: 3, cellIndex: 2 },
     { tag: '{{m_total}}', col: 4, cellIndex: 3, isEuro: true },
+    { tag: '{{m_btw}}', col: 6, cellIndex: 4, isEuro: true }
   ]);
 }
 
@@ -208,32 +213,28 @@ function exportWerkbonPdf(ss, tempCopy, tempCopyId, outputFolder, bonId) {
     const token = ScriptApp.getOAuthToken();
     const response = UrlFetchApp.fetch(url, {
       headers: { Authorization: 'Bearer ' + token },
-      muteHttpExceptions: true,
+      muteHttpExceptions: true
     });
 
     if (response.getResponseCode() !== 200) {
-      throw new Error('The export system returned status code ' + response.getResponseCode());
+      throw new Error('PDF export failed: ' + response.getContentText());
     }
 
     const pdfBlob = response.getBlob().setName(`Werkbon_${bonId}.pdf`);
     outputFolder.createFile(pdfBlob);
+    console.log('PDF successfully exported and saved.');
+
+    try {
+      DriveApp.getFileById(tempCopyId).setTrashed(true);
+      console.log('Temporary document cleaned up.');
+    } catch (cleanupError) {
+      console.log('Could not delete temp doc: ' + cleanupError.message);
+    }
+
     console.timeEnd('Step 7: ULTRA-FAST PDF EXPORT USING DIRECT DOWNLOAD');
-
-    Drive.Files.remove(tempCopyId);
-    ss.toast(`Werkbon ${bonId} was generated in seconds!`);
-  } catch (e) {
-    console.timeEnd('Step 7: ULTRA-FAST PDF EXPORT (FAILED; FALLING BACK TO STANDARD MODE)');
-    exportWerkbonPdfFallback(ss, tempCopy, outputFolder, bonId);
-  }
-}
-
-function exportWerkbonPdfFallback(ss, tempCopy, outputFolder, bonId) {
-  try {
-    const pdfBlob = tempCopy.getAs(MimeType.PDF);
-    outputFolder.createFile(pdfBlob).setName(`Werkbon_${bonId}.pdf`);
-    tempCopy.setTrashed(true);
-    ss.toast('Generated successfully (standard mode).');
-  } catch (err) {
-    ss.toast('Failed to create the PDF. The Docs file was kept in the folder.', 'Warning', 10);
+  } catch (error) {
+    console.error('PDF export error: ' + error.message);
+    console.timeEnd('Step 7: ULTRA-FAST PDF EXPORT USING DIRECT DOWNLOAD');
+    throw error;
   }
 }

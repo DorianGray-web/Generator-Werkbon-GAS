@@ -69,6 +69,16 @@ function cleanId(value) {
   return str;
 }
 
+/**
+ * Generates a stable key for each receipt to isolate processing and prevent
+ * one receipt from overwriting another when multiple unrecognized receipts exist.
+ */
+function generateReceiptKey(filename) {
+  const name = String(filename || '').trim();
+  const cleanName = name.replace(RECEIPTS.processedPrefix || '', '').replace(/[^a-zA-Z0-9]/g, '');
+  return cleanName || 'unknown-' + Date.now();
+}
+
 function getLocatieDataFast(locatiesData, code) {
   const defaultResult = {
     naamLocatie: code,
@@ -171,4 +181,72 @@ function formatEuro(value) {
   }
 
   return '€ ' + number.toFixed(2).replace('.', ',');
+}
+
+/**
+ * Calculates TotalMateriaal respecting the new column G (documentTotalInclVat) rules.
+ * - Rows without receiptKey (legacy): use column E directly.
+ * - Group by receiptKey:
+ *   - If G present: use G (once per group).
+ *   - If no G: use SUM(E) for the group.
+ * - Duplicate G handling:
+ *   - Identical duplicates: log warning, use once.
+ *   - Conflicting values: log error, do not silently choose one (falls back to SUM(E)).
+ */
+function calculateMaterialTotalFromRows(matRows) {
+  if (!Array.isArray(matRows) || matRows.length === 0) {
+    return 0;
+  }
+
+  let total = 0;
+  const groups = {};
+
+  matRows.forEach(function(row) {
+    const receiptKey = row[5] ? String(row[5]).trim() : '';
+    const eValue = Number(row[4]) || 0;
+    const gRaw = (row.length > 6) ? row[6] : undefined;
+    const gValue = (gRaw !== undefined && gRaw !== '' && gRaw !== null) ? Number(gRaw) : NaN;
+
+    if (!receiptKey) {
+      total += eValue;
+      return;
+    }
+
+    if (!groups[receiptKey]) {
+      groups[receiptKey] = { eSum: 0, gValues: [] };
+    }
+
+    groups[receiptKey].eSum += eValue;
+
+    if (Number.isFinite(gValue) && gValue > 0) {
+      groups[receiptKey].gValues.push(gValue);
+    }
+  });
+
+  Object.keys(groups).forEach(function(key) {
+    const g = groups[key];
+
+    if (g.gValues.length > 0) {
+      // Deduplicate for comparison
+      const uniqueGs = [];
+      g.gValues.forEach(function(v) {
+        if (uniqueGs.indexOf(v) === -1) uniqueGs.push(v);
+      });
+
+      if (uniqueGs.length > 1) {
+        console.error('Conflicting document totals (column G) for receiptKey ' + key + ': ' + uniqueGs.join(', '));
+        // Validation error: do not silently pick one. Fall back to eSum.
+        total += g.eSum;
+      } else {
+        if (g.gValues.length > 1) {
+          console.warn('Duplicate identical G values for receiptKey ' + key + '. Using once.');
+        }
+        total += uniqueGs[0];
+      }
+    } else {
+      total += g.eSum;
+    }
+  });
+
+  return Math.round(total * 100) / 100;
 }
