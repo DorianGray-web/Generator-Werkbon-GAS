@@ -15,6 +15,20 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.7.3] - 2026-08-19
+
+### Fixed
+
+- Fixed incorrect splitting of multi-line receipt item descriptions.
+- Fixed processing of multiple receipts belonging to the same Werkbon without overwriting previously imported materials.
+- Added receipt-level isolation using `receiptKey`.
+- Added recognition of shipping costs and additional fees while ignoring discounts, loyalty rewards, and payment metadata.
+- Preserved supplier-printed expense values without redistributing VAT across individual rows.
+- Added document-level `Totaal Incl. BTW` handling per receipt/invoice.
+- Updated `TotalMateriaal` calculation to use authoritative document totals per receipt when available, with backward-compatible fallbacks.
+- Fixed leading quantity prefixes being duplicated in material names.
+- Added regression tests for receipt parsing, multiple receipts, additional costs, document totals, and legacy rows.
+
 ## [1.7.2] - 2026-07-15
 
 ### Changed
