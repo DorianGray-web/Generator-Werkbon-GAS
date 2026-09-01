@@ -254,6 +254,21 @@ Version 1.7.3 extends the receipt-processing reliability layer introduced in v1.
 
 ## Testing
 
+**Add the QUnitGS2 library (required)**
+
+The test suite depends on the external QUnitGS2 library.
+
+1. Open the project in the Google Apps Script editor.
+2. In the left sidebar, click **Libraries**.
+3. Click **+ Add a library**.
+4. Paste the Script ID:
+   `1tXPhZmIyYiA_EMpTRJw0QpVGT5Pdb02PpOHCi9A9FFidblOc9CY_VLgG`
+5. Select version **23**.
+6. Set the identifier to `QUnitGS2`.
+7. Click **Add**.
+
+The library is declared in `appsscript.json` under `dependencies.libraries`. When using clasp, keep the manifest under version control so the dependency configuration stays synchronized with the project.
+
 The project includes a QUnitGS2 test suite for pure and business-logic helpers.
 
 Current test coverage includes:
@@ -397,4 +412,3 @@ https://github.com/DorianGray-web
 ---
 
 ⭐ If you find this project useful, consider giving it a star!
-
