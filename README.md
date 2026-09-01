@@ -7,7 +7,7 @@
 ![Architecture](https://img.shields.io/badge/Architecture-Modular-blueviolet)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
-![Release](https://img.shields.io/badge/Release-v1.7.3-blue)
+![Release](https://img.shields.io/badge/Release-v1.7.4-blue)
 
 ---
 
@@ -316,11 +316,15 @@ The validation confirmed material extraction, Werkbon data updates, document pop
 
 ![QUnitGS2 v1.7.3 test results](screenshots/qunit-v1.7.3-tests.png)
 
+*Historical v1.7.3 test run retained for reference.*
+
+![QUnitGS2 v1.7.4 test results](screenshots/qunit-v1.7.4-tests.png)
+
 Current test suite:
 
-- 34 tests
-- 79 assertions
-- 79 passed
+- 38 tests
+- 94 assertions
+- 94 passed
 - 0 failed
 
 ### Google Sheets
@@ -339,7 +343,7 @@ Below is an example of the generated maintenance work order.
 
 Sample PDF:
 
-[Werkbon_ENG-20260518-004.pdf](pdf/Werkbon_ENG-20260518-004.pdf)
+[Werkbon_ENG-20260518-004.pdf](screenshots/template%20v.2.png)
 
 ---
 

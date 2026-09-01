@@ -15,6 +15,29 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.7.4] - 2026-09-01
+
+### Fixed
+
+- Fixed receipt reconciliation for documents whose printed material rows are VAT-exclusive while the payable document total is VAT-inclusive.
+- Reconciliation now accepts printed row totals that match either the authoritative `inclVAT` or `exclVAT` total, while genuine mismatches continue to fail closed.
+- Fixed optional receipt totals in Werkbon material tables so absent Column G values remain blank instead of being rendered as `€0,00`.
+- Preserved `documentTotalInclVat` as the receipt-level payable total independently from the printed material-row basis.
+
+### Testing
+
+- Added regression coverage for VAT-inclusive and VAT-exclusive receipt bases, genuine reconciliation mismatches, optional document totals, and receipt-level material-total calculation.
+- Declared the QUnitGS2 v23 dependency in the Apps Script manifest and documented the test setup.
+
+### Validation
+
+- Confirmed the PLA VAT-exclusive case: printed rows total `€14.29`, document total `€17.29`.
+- Confirmed the Hubo 's-Heerenberg VAT-inclusive case: printed rows and document total `€21.49`.
+- Confirmed the Hubo Didam receipt without a separate VAT breakdown: `€44.17`.
+- Full QUnitGS2 suite passed on 2026-09-01: **94 of 94 assertions passed, 0 failed**.
+
+---
+
 ## [1.7.3] - 2026-08-19
 
 ### Fixed
