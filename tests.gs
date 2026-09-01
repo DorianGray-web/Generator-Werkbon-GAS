@@ -107,6 +107,25 @@ function doGet() {
   );
 
   // ==================================================
+  // formatOptionalDocumentTotal()
+  // ==================================================
+
+  QUnit.test(
+    'formatOptionalDocumentTotal — absent vs zero semantics',
+    function (assert) {
+      assert.equal(formatOptionalDocumentTotal(''), '');
+      assert.equal(formatOptionalDocumentTotal(null), '');
+      assert.equal(formatOptionalDocumentTotal(undefined), '');
+
+      assert.equal(formatOptionalDocumentTotal(0), formatEuro(0));
+
+      assert.equal(formatOptionalDocumentTotal(44.17), formatEuro(44.17));
+
+      assert.equal(formatOptionalDocumentTotal('21.49'), formatEuro('21.49'));
+    }
+  );
+
+  // ==================================================
   // formatWerkbonDate()
   // ==================================================
 
@@ -605,6 +624,95 @@ function doGet() {
       const result = normalizeAndAggregateReceiptData(raw);
 
       assert.notOk(result.reconciled);
+    }
+  );
+
+  QUnit.test(
+    'normalizeAndAggregateReceiptData — PLA EXCL-basis 14.29 regression',
+    function (assert) {
+      const raw = {
+        items: [
+          {
+            name: "CorePro LED PLC 5.9W 840 2P G24d-1",
+            quantity: 2,
+            unitPrice: 4.60,
+            lineTotal: 9.20
+          }
+        ],
+        additionalCosts: [
+          { name: "Verwijderingsbijdrage", type: "fee", amount: 0.14 },
+          { name: "Vrachtkosten", type: "shipping", amount: 4.95 }
+        ],
+        vat: {
+          rate: 0.21,
+          amount: 3.00
+        },
+        totals: {
+          exclVAT: 14.29,
+          inclVAT: 17.29,
+          vatAmount: 3.00
+        }
+      };
+
+      const result = normalizeAndAggregateReceiptData(raw);
+
+      assert.ok(Math.abs(result.finalSum - 14.29) < 0.01);
+      assert.ok(result.reconciled);
+      assert.equal(result.documentTotalInclVat, 17.29);
+    }
+  );
+
+  QUnit.test(
+    'normalizeAndAggregateReceiptData — Hubo s-Heerenberg 21.49 regression',
+    function (assert) {
+      const raw = {
+        items: [
+          {
+            name: "1 HG oven/grill vernieuwingskit",
+            quantity: 1,
+            unitPrice: 21.49,
+            lineTotal: 21.49
+          }
+        ],
+        additionalCosts: [],
+        vat: {
+          rate: 0.21,
+          amount: 3.73
+        },
+        totals: {
+          exclVAT: 17.76,
+          inclVAT: 21.49,
+          vatAmount: 3.73
+        }
+      };
+
+      const result = normalizeAndAggregateReceiptData(raw);
+
+      assert.ok(Math.abs(result.finalSum - 21.49) < 0.01);
+      assert.ok(result.reconciled);
+      assert.equal(result.documentTotalInclVat, 21.49);
+    }
+  );
+
+  QUnit.test(
+    'normalizeAndAggregateReceiptData — Hubo Didam 44.17 regression',
+    function (assert) {
+      const raw = {
+        items: [
+          { name: 'Item1', quantity: 1, unitPrice: 19.29, lineTotal: 19.29 },
+          { name: 'Item2', quantity: 1, unitPrice: 15.49, lineTotal: 15.49 },
+          { name: 'Item3', quantity: 1, unitPrice: 9.39, lineTotal: 9.39 }
+        ],
+        additionalCosts: [],
+        vat: null,
+        totals: { inclVAT: 44.17 }
+      };
+
+      const result = normalizeAndAggregateReceiptData(raw);
+
+      assert.ok(Math.abs(result.finalSum - 44.17) < 0.01);
+      assert.ok(result.reconciled);
+      assert.equal(result.documentTotalInclVat, 44.17);
     }
   );
 

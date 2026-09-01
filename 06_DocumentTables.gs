@@ -78,7 +78,9 @@ function populateConfiguredCell(row, data, cfg, numCells) {
   let valStr = rawVal !== undefined && rawVal !== null ? rawVal.toString().trim() : '';
 
   if (cfg.isEuro) {
-    valStr = formatEuro(rawVal);
+  valStr = cfg.isOptionalDocumentTotal
+    ? formatOptionalDocumentTotal(rawVal)
+    : formatEuro(rawVal);
   }
 
   try {

@@ -201,7 +201,7 @@ function populateWerkbonTables(body, urenRows, matRows) {
     { tag: '{{m_price}}', col: 2, cellIndex: 1, isEuro: true },
     { tag: '{{m_qty}}', col: 3, cellIndex: 2 },
     { tag: '{{m_total}}', col: 4, cellIndex: 3, isEuro: true },
-    { tag: '{{m_btw}}', col: 6, cellIndex: 4, isEuro: true }
+    { tag: '{{m_btw}}', col: 6, cellIndex: 4, isEuro: true, isOptionalDocumentTotal: true }
   ]);
 }
 

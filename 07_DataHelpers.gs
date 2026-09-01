@@ -183,6 +183,13 @@ function formatEuro(value) {
   return '€ ' + number.toFixed(2).replace('.', ',');
 }
 
+function formatOptionalDocumentTotal(value) {
+  if (value === null || value === undefined || value === '') {
+    return '';
+  }
+  return formatEuro(value);
+}
+
 /**
  * Calculates TotalMateriaal respecting the new column G (documentTotalInclVat) rules.
  * - Rows without receiptKey (legacy): use column E directly.

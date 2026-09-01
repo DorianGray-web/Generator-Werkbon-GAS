@@ -46,11 +46,17 @@ function processNewReceipts() {
       const normalized = normalizeAndAggregateReceiptData(rawReceiptData);
 
       if (!normalized.reconciled && (normalized.printedIncl > 0 || normalized.printedExcl > 0)) {
-        const expected = normalized.printedExcl > 0 ? normalized.printedExcl : normalized.printedIncl;
-        throw new Error(
-          `Receipt could not be reconciled to the printed total of €${expected.toFixed(2)}. ` +
-          'The resulting Werkbon would have incorrect totals. Manual review required.'
-        );
+        const incl = normalized.printedIncl;
+        const excl = normalized.printedExcl;
+        let msg;
+        if (incl > 0 && excl > 0) {
+          msg = `Receipt could not be reconciled with the printed totals\n(incl. VAT: €${incl.toFixed(2)}, excl. VAT: €${excl.toFixed(2)}).`;
+        } else if (incl > 0) {
+          msg = `Receipt could not be reconciled with the printed total\n(incl. VAT: €${incl.toFixed(2)}).`;
+        } else {
+          msg = `Receipt could not be reconciled with the printed total\n(excl. VAT: €${excl.toFixed(2)}).`;
+        }
+        throw new Error(msg + ' The resulting Werkbon would have incorrect totals. Manual review required.');
       }
 
       console.log('Normalized receipt data. Final expense sum: ' + normalized.finalSum.toFixed(2));
@@ -165,7 +171,10 @@ function findAllUnprocessedReceipts(receiptsFolderId) {
  * - Preserves printed values for product items (no per-line VAT reconstruction).
  * - Aggregates additional costs by category using their printed amounts.
  * - Does NOT allocate VAT from one category to another (no foreign BTW shares).
- * - Reconciles against printed exclVAT when available, otherwise inclVAT.
+ * - Reconciles the sum of printed item + additional values against an available authoritative printed total.
+ *   Printed rows may be VAT-inclusive or VAT-exclusive. Reconciliation succeeds when the extracted
+ *   sum matches either the inclVAT or exclVAT total (within tolerance).
+ * - VAT metadata (exclVAT/vatAmount) is secondary and does not override the payable total.
  */
 function normalizeAndAggregateReceiptData(rawData) {
   if (!rawData) {
@@ -260,16 +269,34 @@ function normalizeAndAggregateReceiptData(rawData) {
     return sum + ((Number(r.quantity) || 0) * (Number(r.price) || 0));
   }, 0);
 
-  const expectedTotal = (Number.isFinite(printedExcl) && printedExcl > 0) ? printedExcl : printedIncl;
+  // Business invariant:
+  //   extracted printed item/additional-cost values (finalSum)
+  //       ↕ reconcile against
+  //   an available authoritative printed total (inclVAT or exclVAT)
+  //
+  // Printed rows may be VAT-inclusive or VAT-exclusive.
+  // Reconciliation succeeds when finalSum matches either available total within tolerance.
+  // totals.exclVAT and vatAmount are secondary consistency information.
+  const hasIncl = Number.isFinite(printedIncl) && printedIncl > 0;
+  const hasExcl = Number.isFinite(printedExcl) && printedExcl > 0;
+  const matchesIncl = hasIncl && (Math.abs(roundToCents(finalSum) - roundToCents(printedIncl)) <= 0.02);
+  const matchesExcl = hasExcl && (Math.abs(roundToCents(finalSum) - roundToCents(printedExcl)) <= 0.02);
 
-  const reconciled = !hasAuthoritativeTotal ||
-    (Math.abs(roundToCents(finalSum) - roundToCents(expectedTotal)) <= 0.02);
+  const reconciled = !hasAuthoritativeTotal || matchesIncl || matchesExcl;
 
   if (!reconciled) {
     console.warn(
       'Reconciliation issue: final computed sum = ' + finalSum.toFixed(2) +
-      ', expected = ' + expectedTotal.toFixed(2)
+      ', incl = ' + printedIncl.toFixed(2) + ', excl = ' + printedExcl.toFixed(2)
     );
+  }
+
+  // Small diagnostic-only check for VAT metadata consistency (does not affect reconciled, does not throw)
+  if (hasIncl && hasExcl && Number(vatInfo.amount) > 0) {
+    const computedIncl = roundToCents(printedExcl + Number(vatInfo.amount));
+    if (Math.abs(computedIncl - printedIncl) > 0.02) {
+      console.warn('VAT metadata inconsistency (diagnostic only, does not affect reconciliation)');
+    }
   }
 
   // Determine documentTotalInclVat for column G (only when we have a reliable printed incl. VAT)
