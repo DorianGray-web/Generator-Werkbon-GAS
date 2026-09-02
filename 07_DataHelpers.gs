@@ -257,3 +257,13 @@ function calculateMaterialTotalFromRows(matRows) {
 
   return Math.round(total * 100) / 100;
 }
+
+function safeToast(spreadsheet, message, title, timeoutSeconds) {
+  try {
+    if (spreadsheet && typeof spreadsheet.toast === 'function') {
+      spreadsheet.toast(message, title, timeoutSeconds);
+    }
+  } catch (e) {
+    console.log('Notification skipped (non-UI / editor context): ' + (e && e.message ? e.message : e));
+  }
+}

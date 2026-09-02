@@ -14,12 +14,12 @@ function runFullWorkflow() {
     SpreadsheetApp.flush();
     Utilities.sleep(1000);
 
-    generateWerkbon();
+    generateWerkbon(ss);
 
     console.log('=== FULL WERKBON PROCESS FINISHED ===');
-    ss.toast('Receipt processed, materials added, and Werkbon PDF created.', 'Done', 8);
+    safeToast(ss, 'Receipt processed, materials added, and Werkbon PDF created.', 'Done', 8);
   } catch (error) {
     console.error('Full workflow error: ' + error.message);
-    ss.toast(error.message, 'Error', 10);
+    safeToast(ss, error.message, 'Error', 10);
   }
 }

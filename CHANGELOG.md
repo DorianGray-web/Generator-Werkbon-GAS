@@ -15,6 +15,29 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Updated the OpenAI dispatch log to refer to a receipt instead of an image because ingestion supports both images and PDFs.
+
+### Testing
+
+- Restored regression coverage proving that identical duplicate Column G totals for one `receiptKey` are counted only once.
+- Retained the existing conflicting-Column-G regression, which verifies deterministic `SUM(E)` fallback instead of silently selecting a conflicting document total.
+- Restored regression coverage for keyed receipt groups without Column G and mixed legacy/keyed material rows.
+- Added offline boundary coverage for unsupported MIME types and PDFs above the project raw-size limit.
+- Manually confirmed the release-candidate QUnitGS2 suite in the isolated test GAS environment: **47 tests, 115 assertions, 115 passed, 0 failed**.
+
+### Validation
+
+- Validated the first controlled real-PDF path in the isolated test GAS environment using a Lampdirect invoice: product `2 × €4.60 = €9.20`, fee `€0.14`, shipping `€4.95`, total excl. VAT `€14.29`, VAT `€3.00`, and total incl. VAT `€17.29`.
+- Confirmed correct canonical extraction, normalization and EXCL/INCL reconciliation; the Materialen sheet contained the product, fee, and shipping rows, with Column G containing `€17.29` once for the `receiptKey`.
+- Confirmed that the generated Werkbon PDF contained the same three material rows and the `€17.29` incl. VAT total, and that final PDF export succeeded.
+- This evidence validates the first controlled fixture and workflow path, not general correctness for every PDF or invoice format.
+
+---
+
 ## [1.7.4] - 2026-09-01
 
 ### Fixed

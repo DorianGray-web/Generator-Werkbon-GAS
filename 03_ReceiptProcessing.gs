@@ -28,8 +28,8 @@ function processNewReceipts() {
   const filesToProcess = findAllUnprocessedReceipts(receiptsFolderId);
 
   if (filesToProcess.length === 0) {
-    console.log('No unprocessed receipt images were found.');
-    ss.toast('No new receipts found.', 'Info', 5);
+    console.log('No unprocessed supported receipts were found.');
+    safeToast(ss, 'No new receipts found.', 'Info', 5);
     return;
   }
 
@@ -40,7 +40,7 @@ function processNewReceipts() {
     console.log(`--- Processing receipt ${index + 1}/${filesToProcess.length} for order ${bonId}: ${originalName} ---`);
 
     try {
-      console.log('Sending the image to OpenAI...');
+      console.log('Sending the receipt to OpenAI...');
       const rawReceiptData = analyzeReceiptWithOpenAI(fileToProcess);
 
       const normalized = normalizeAndAggregateReceiptData(rawReceiptData);
@@ -76,7 +76,7 @@ function processNewReceipts() {
   });
 
   console.log('All receipts processed for bonId: ' + bonId);
-  ss.toast(`Processed ${filesToProcess.length} receipt(s) for order ${bonId}`, 'Done', 8);
+  safeToast(ss, `Processed ${filesToProcess.length} receipt(s) for order ${bonId}`, 'Done', 8);
 }
 
 function getSelectedWerkbonId(generalSheet) {
@@ -156,9 +156,9 @@ function findAllUnprocessedReceipts(receiptsFolderId) {
     const nextFile = files.next();
     const mimeType = nextFile.getMimeType();
     const isUnprocessed = nextFile.getName().indexOf(RECEIPTS.processedPrefix.trim()) === -1;
-    const isImage = mimeType.indexOf('image/') !== -1;
+    const isSupported = mimeType.indexOf('image/') !== -1 || mimeType === 'application/pdf';
 
-    if (isUnprocessed && isImage) {
+    if (isUnprocessed && isSupported) {
       unprocessed.push(nextFile);
     }
   }
