@@ -7,7 +7,7 @@
 ![Architecture](https://img.shields.io/badge/Architecture-Modular-blueviolet)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
-![Release](https://img.shields.io/badge/Release-v1.7.4-blue)
+![Release](https://img.shields.io/badge/Release-v1.8.0-blue)
 
 ---
 
@@ -93,7 +93,7 @@ PDF Work Order
 - Google Sheets
 - Google Docs
 - Google Drive
-- OpenAI API — GPT-4o Vision
+- OpenAI API — Chat Completions for images and Responses API for PDFs (GPT-4o)
 - Script Properties
 - Advanced Google Drive Service
 
@@ -141,7 +141,7 @@ Store sensitive and environment-specific information using:
 
 **Google Apps Script → Project Settings → Script Properties**
 
-Required properties:
+Configuration properties:
 
 | Property | Description |
 |---|---|
@@ -151,6 +151,7 @@ Required properties:
 | `TEMPLATE_DOC_ID` | Google Docs template ID |
 | `PDF_OUTPUT_FOLDER_ID` | Output folder for generated PDF files |
 | `DEBUG_OPENAI_RESPONSE_LOGGING` | Optional: set to `true` to log raw AI output |
+| `EDITOR_TEST_WERKBON_ID` | Optional: fallback Werkbon ID for editor/test runs; not required for production menu use |
 
 Missing required configuration values are validated at runtime and produce a descriptive error message.
 
@@ -185,7 +186,7 @@ Before connecting or testing this version:
 2. Go to **Extensions → Apps Script**.
 3. Verify which bound project belongs to the copied sheet.
 4. Remove obsolete copied script code or old bound project copies from the test environment.
-5. Ensure that only the intended v1.7 implementation is used.
+5. Ensure that only the intended v1.8.0 implementation is used.
 6. Reconfigure Script Properties in the copied project because they may not be transferred automatically.
 
 > Do not delete the production Apps Script project connected to the original working spreadsheet.
@@ -302,7 +303,11 @@ The complete receipt-to-PDF workflow was also validated separately in an isolate
 
 The validation confirmed material extraction, Werkbon data updates, document population, and final PDF generation.
 
-PDF ingestion was additionally validated with a controlled real Lampdirect invoice in an isolated test GAS environment. The canonical extraction and reconciliation preserved `2 × €4.60 = €9.20`, a `€0.14` fee, `€4.95` shipping, `€14.29` excl. VAT, `€3.00` VAT, and `€17.29` incl. VAT. The Materialen sheet and generated Werkbon PDF contained the correct three material rows, Column G stored `€17.29` once for the `receiptKey`, and final PDF export succeeded. This validates the first controlled real-PDF path, not every possible PDF or invoice format.
+### v1.8.0 PDF-ingestion validation
+
+PDF ingestion was validated with one controlled real Lampdirect invoice in an isolated test GAS environment. The canonical extraction and reconciliation preserved `2 × €4.60 = €9.20`, a `€0.14` fee, `€4.95` shipping, `€14.29` excl. VAT, `€3.00` VAT, and `€17.29` incl. VAT. The Materialen sheet and generated Werkbon PDF contained the correct three material rows, Column G stored `€17.29` once for the `receiptKey`, and final PDF export succeeded. This validates one controlled real-PDF fixture only; it does not establish correctness for arbitrary invoice formats or multi-PDF runs.
+
+Multiple-file processing is supported by the common processing loop, while multi-PDF end-to-end validation remains future validation work.
 
 ---
 
@@ -322,7 +327,7 @@ PDF ingestion was additionally validated with a controlled real Lampdirect invoi
 
 ![QUnitGS2 v1.7.4 test results](screenshots/qunit-v1.7.4-tests.png)
 
-Current release-candidate test suite, manually confirmed in the isolated test GAS environment:
+v1.8.0 test suite, confirmed in the isolated test GAS environment:
 
 - 47 tests
 - 115 assertions

@@ -6,8 +6,8 @@ This project is currently maintained as an open-source portfolio and automation 
 
 | Version | Supported |
 |---------|-----------|
-| 1.6.x   | ✅ Yes |
-| < 1.6   | ❌ No |
+| 1.8.x   | ✅ Yes |
+| < 1.8   | ❌ No |
 
 ---
 
@@ -86,9 +86,9 @@ Avoid using real personal, medical, financial, or confidential data in public ex
 
 ## OpenAI Usage
 
-Receipt images may contain personal or business-sensitive information.
+Receipt and invoice images or PDF documents may contain personal or business-sensitive information.
 
-Before sending images to the OpenAI API, make sure that:
+Before sending receipt or invoice images or PDF documents to the OpenAI API, make sure that:
 
 - You have permission to process the data
 - The data is relevant to the workflow
@@ -104,7 +104,7 @@ Before pushing changes to GitHub:
 - [ ] No API keys are present
 - [ ] No Google Drive IDs are hardcoded
 - [ ] No private spreadsheet or document IDs are committed
-- [ ] No real receipt images are included
+- [ ] No real receipt images or invoice PDFs are included
 - [ ] No personal data is visible in screenshots
 - [ ] All configuration values are loaded from Script Properties
 - [ ] Example files are anonymized

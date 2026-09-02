@@ -15,11 +15,18 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
-## [Unreleased]
+## [1.8.0] - 2026-09-02
+
+### Added
+
+- Added `application/pdf` receipt and invoice ingestion through the OpenAI Responses API; `image/*` inputs remain on the existing Chat Completions path.
+- Added a 5 MiB raw-size limit for PDF inputs. Oversized PDFs and unsupported MIME types fail closed before an OpenAI API fetch.
+- Both PDF and image paths return the canonical receipt contract and use the shared normalization and reconciliation flow.
 
 ### Changed
 
 - Updated the OpenAI dispatch log to refer to a receipt instead of an image because ingestion supports both images and PDFs.
+- Preserved `receiptKey` isolation and receipt-level Column G semantics across the shared downstream material-total flow.
 
 ### Testing
 
@@ -27,14 +34,15 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 - Retained the existing conflicting-Column-G regression, which verifies deterministic `SUM(E)` fallback instead of silently selecting a conflicting document total.
 - Restored regression coverage for keyed receipt groups without Column G and mixed legacy/keyed material rows.
 - Added offline boundary coverage for unsupported MIME types and PDFs above the project raw-size limit.
-- Manually confirmed the release-candidate QUnitGS2 suite in the isolated test GAS environment: **47 tests, 115 assertions, 115 passed, 0 failed**.
+- Confirmed the v1.8.0 QUnitGS2 gate in the isolated test GAS environment: **47 tests, 115 assertions, 115 passed, 0 failed**.
 
 ### Validation
 
 - Validated the first controlled real-PDF path in the isolated test GAS environment using a Lampdirect invoice: product `2 × €4.60 = €9.20`, fee `€0.14`, shipping `€4.95`, total excl. VAT `€14.29`, VAT `€3.00`, and total incl. VAT `€17.29`.
 - Confirmed correct canonical extraction, normalization and EXCL/INCL reconciliation; the Materialen sheet contained the product, fee, and shipping rows, with Column G containing `€17.29` once for the `receiptKey`.
 - Confirmed that the generated Werkbon PDF contained the same three material rows and the `€17.29` incl. VAT total, and that final PDF export succeeded.
-- This evidence validates the first controlled fixture and workflow path, not general correctness for every PDF or invoice format.
+- This evidence validates one controlled real-PDF fixture and workflow path; it does not establish correctness for arbitrary invoice formats or multi-PDF runs.
+- Multiple-file processing is supported by the common processing loop, while multi-PDF end-to-end validation remains future validation work.
 
 ---
 

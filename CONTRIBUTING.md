@@ -93,7 +93,7 @@ Never commit:
 - Google Drive IDs
 - Spreadsheet IDs
 - User data
-- Receipt images containing personal information
+- Receipt images or invoice PDFs containing personal information
 
 Use Google Apps Script Script Properties for all configuration values.
 
