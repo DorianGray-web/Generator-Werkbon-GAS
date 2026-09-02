@@ -15,7 +15,7 @@
 
 Generator-Werkbon-GAS is a modular Google Apps Script project designed to automate the creation of maintenance work orders (`Werkbon`).
 
-The system uses OpenAI GPT-4o Vision to recognize construction receipts, extract purchased materials, store them in Google Sheets, and generate a ready-to-print PDF work order using a Google Docs template.
+The system uses OpenAI GPT-4o to process construction receipt images and PDF invoices, extract purchased materials, store them in Google Sheets, and generate a ready-to-print PDF work order using a Google Docs template.
 
 The project was developed to reduce repetitive administrative work and demonstrate practical AI integration into everyday business workflows.
 
@@ -34,7 +34,7 @@ The project was developed to reduce repetitive administrative work and demonstra
 
 ## ✨ Features
 
-- AI receipt recognition using OpenAI GPT-4o Vision
+- AI receipt recognition for images and PDFs using OpenAI GPT-4o
 - Automatic processing of multiple receipts for a single Werkbon
 - Multi-line receipt item reconstruction
 - Material extraction: name, quantity, unit price and line total
@@ -58,10 +58,10 @@ The project was developed to reduce repetitive administrative work and demonstra
 ## 🔄 Workflow
 
 ```text
-Receipt / Invoice Image
+Receipt / Invoice Image or PDF
         │
         ▼
-OpenAI GPT-4o Vision
+OpenAI Receipt Extraction
         │
         ▼
 Structured Receipt Extraction
@@ -302,6 +302,8 @@ The complete receipt-to-PDF workflow was also validated separately in an isolate
 
 The validation confirmed material extraction, Werkbon data updates, document population, and final PDF generation.
 
+PDF ingestion was additionally validated with a controlled real Lampdirect invoice in an isolated test GAS environment. The canonical extraction and reconciliation preserved `2 × €4.60 = €9.20`, a `€0.14` fee, `€4.95` shipping, `€14.29` excl. VAT, `€3.00` VAT, and `€17.29` incl. VAT. The Materialen sheet and generated Werkbon PDF contained the correct three material rows, Column G stored `€17.29` once for the `receiptKey`, and final PDF export succeeded. This validates the first controlled real-PDF path, not every possible PDF or invoice format.
+
 ---
 
 ## 📸 Screenshots
@@ -320,11 +322,11 @@ The validation confirmed material extraction, Werkbon data updates, document pop
 
 ![QUnitGS2 v1.7.4 test results](screenshots/qunit-v1.7.4-tests.png)
 
-Current test suite:
+Current release-candidate test suite, manually confirmed in the isolated test GAS environment:
 
-- 38 tests
-- 94 assertions
-- 94 passed
+- 47 tests
+- 115 assertions
+- 115 passed
 - 0 failed
 
 ### Google Sheets

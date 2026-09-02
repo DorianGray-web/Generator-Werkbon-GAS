@@ -2,11 +2,16 @@
 // WERKBON PDF GENERATION
 // =========================================================================
 
-function generateWerkbon() {
+function generateWerkbon(spreadsheet) {
   const templateDocId = getRequiredConfigValue(CONFIG.templateDocId, 'TEMPLATE_DOC_ID');
   const pdfOutputFolderId = getRequiredConfigValue(CONFIG.pdfOutputFolderId, 'PDF_OUTPUT_FOLDER_ID');
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = spreadsheet || SpreadsheetApp.getActiveSpreadsheet();
+
+  if (!ss) {
+    throw new Error("No spreadsheet available. generateWerkbon() was called without a spreadsheet argument and SpreadsheetApp.getActiveSpreadsheet() returned null (common in editor context).");
+  }
+
   const generalSheet = ss.getSheetByName(SHEETS.werkbonnen);
 
   if (!generalSheet) {
