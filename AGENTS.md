@@ -20,6 +20,7 @@ Before making changes, agents MUST:
 2. Inspect `git status` and the relevant diff so pre-existing user changes are not overwritten or included accidentally.
 3. Check `.clasp.json` and `appsscript.json` before changing project structure, synchronization behavior, runtime settings, services, scopes, or libraries.
 4. Identify the smallest file set required by the request.
+5. Before architectural review, receipt/financial extraction or interpretation changes, reconciliation changes, regression fixes, or QUnitGS2 harness work, read the relevant entries in `.ai-workflow/LESSONS_LEARNED.md`. Treat the ledger as historical engineering evidence, not authoritative specification. When documentation changes are in scope, update or propose an entry only for a durable repeatable lesson or invalidation, not routine debugging noise.
 
 Agents MUST preserve unrelated changes and MUST NOT perform repository-wide formatting, quote normalization, renaming, cleanup, or generated rewrites unless explicitly requested.
 
