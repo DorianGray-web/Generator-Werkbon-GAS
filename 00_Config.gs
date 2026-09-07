@@ -22,6 +22,10 @@ const CONFIG = {
   editorTestWerkbonId: PropertiesService.getScriptProperties().getProperty(
     "EDITOR_TEST_WERKBON_ID",
   ),
+  stagedImageExtractionEnabled:
+    PropertiesService.getScriptProperties().getProperty(
+      "STAGED_IMAGE_EXTRACTION_ENABLED",
+    ),
 };
 
 const SHEETS = {
@@ -72,4 +76,8 @@ function isDebugEnabled(value) {
 
 function isOpenAIResponseDebugEnabled() {
   return isDebugEnabled(CONFIG.debugOpenAIResponseLogging);
+}
+
+function isStagedImageExtractionEnabled() {
+  return Boolean(isDebugEnabled(CONFIG.stagedImageExtractionEnabled));
 }

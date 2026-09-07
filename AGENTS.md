@@ -4,7 +4,7 @@ This file governs automated work in this repository. Keep changes narrow, eviden
 
 ## Repository boundaries
 
-- `00_Config.gs` through `07_DataHelpers.gs` are production Google Apps Script modules.
+- `00_Config.gs` through `08_StagedReceiptExtraction.gs` are production Google Apps Script modules.
 - `tests.gs` is the QUnitGS2 test suite that runs in Google Apps Script.
 - `appsscript.json` is the version-controlled Apps Script manifest.
 - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, and `SECURITY.md` are project documentation.

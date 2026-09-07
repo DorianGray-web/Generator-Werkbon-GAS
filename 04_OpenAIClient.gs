@@ -23,8 +23,12 @@ function analyzeReceiptWithOpenAI(file) {
   }
 
   const mimeType = file.getMimeType();
+  const analysisRoute = getReceiptAnalysisRoute_(
+    mimeType,
+    isStagedImageExtractionEnabled(),
+  );
 
-  if (mimeType === 'application/pdf') {
+  if (analysisRoute === 'pdf') {
     const size = file.getSize();
     if (size > MAX_PDF_SIZE_BYTES) {
       throw new Error(`PDF file is too large for processing (${size} bytes). The project uses a conservative 5 MiB limit for PDF ingestion to bound payload size and processing time.`);
@@ -53,32 +57,180 @@ function analyzeReceiptWithOpenAI(file) {
     }
 
     return parseOpenAIPdfReceiptResponse(responseText);
-  } else if (mimeType.indexOf('image/') === 0) {
+  } else if (
+    analysisRoute === 'legacy-image' ||
+    analysisRoute === 'staged-image'
+  ) {
     const blob = file.getBlob();
     const base64Data = Utilities.base64Encode(blob.getBytes());
-    const payload = buildOpenAIReceiptPayload(mimeType, base64Data);
-    const options = {
-      method: 'post',
-      headers: {
-        Authorization: `Bearer ${openAIApiKey}`,
-        'Content-Type': 'application/json',
+    return executeImageReceiptAnalysisRoute_(
+      analysisRoute === 'staged-image',
+      function () {
+        return analyzeImageReceiptWithStagedExtraction_(
+          mimeType,
+          base64Data,
+          openAIApiKey,
+        );
       },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true,
-    };
-
-    const response = UrlFetchApp.fetch(OPENAI.apiUrl, options);
-    const responseCode = response.getResponseCode();
-    const responseText = response.getContentText();
-
-    if (responseCode !== 200) {
-      throw new Error(`OpenAI API returned an error: ${responseCode} - ${responseText}`);
-    }
-
-    return parseOpenAIReceiptResponse(responseText);
+      function () {
+        return analyzeImageReceiptWithLegacyExtraction_(
+          mimeType,
+          base64Data,
+          openAIApiKey,
+        );
+      },
+    );
   } else {
     throw new Error(`Unsupported MIME type for receipt analysis: ${mimeType}`);
   }
+}
+
+function getReceiptAnalysisRoute_(mimeType, stagedImageEnabled) {
+  if (mimeType === 'application/pdf') return 'pdf';
+  if (mimeType.indexOf('image/') === 0) {
+    return stagedImageEnabled ? 'staged-image' : 'legacy-image';
+  }
+  return 'unsupported';
+}
+
+function executeImageReceiptAnalysisRoute_(
+  stagedEnabled,
+  stagedAnalyzer,
+  legacyAnalyzer,
+) {
+  return stagedEnabled ? stagedAnalyzer() : legacyAnalyzer();
+}
+
+function analyzeImageReceiptWithLegacyExtraction_(
+  mimeType,
+  base64Data,
+  openAIApiKey,
+) {
+  const payload = buildOpenAIReceiptPayload(mimeType, base64Data);
+  const options = {
+    method: 'post',
+    headers: {
+      Authorization: `Bearer ${openAIApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  };
+
+  const response = UrlFetchApp.fetch(OPENAI.apiUrl, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (responseCode !== 200) {
+    throw new Error(`OpenAI API returned an error: ${responseCode} - ${responseText}`);
+  }
+
+  return parseOpenAIReceiptResponse(responseText);
+}
+
+function analyzeImageReceiptWithStagedExtraction_(
+  mimeType,
+  base64Data,
+  openAIApiKey,
+) {
+  const payload = buildOpenAIStage1V2Payload_(mimeType, base64Data);
+  const response = UrlFetchApp.fetch(OPENAI.apiUrl, {
+    method: 'post',
+    headers: {
+      Authorization: `Bearer ${openAIApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+  const responseCode = response.getResponseCode();
+
+  if (responseCode !== 200) {
+    throw createStagedImageExtractionError_(
+      'perception',
+      'STAGE1_HTTP_' + responseCode,
+    );
+  }
+
+  const evidence = parseStagedImageEvidenceOrThrow_(response.getContentText());
+  return buildStagedCanonicalReceiptOrThrow_(evidence);
+}
+
+function parseStagedImageEvidenceOrThrow_(responseText) {
+  try {
+    return parseOpenAIStage1V2Response_(responseText);
+  } catch (error) {
+    throw createStagedImageExtractionError_(
+      'perception',
+      'INVALID_STAGE1_RESPONSE',
+    );
+  }
+}
+
+function buildStagedCanonicalReceiptOrThrow_(evidence) {
+  const stagedResult = buildStagedReceiptCandidate(evidence);
+
+  if (!stagedResult.structuralStatus.resolved) {
+    throw createStagedImageExtractionError_(
+      'structure',
+      firstStagedIssueCode_(
+        stagedResult.structuralStatus.conflicts,
+        'UNRESOLVED_STRUCTURE',
+      ),
+    );
+  }
+  if (!stagedResult.financialStatus.resolved) {
+    if (
+      stagedResult.financialStatus.code === "AMBIGUOUS_PRINTED_TOTAL_TYPE"
+    ) {
+      return buildForwardPricedAnchorCanonicalReceiptOrThrow_(stagedResult);
+    }
+    throw createStagedImageExtractionError_(
+      'financial',
+      stagedResult.financialStatus.code || 'UNRESOLVED_FINANCIAL_EVIDENCE',
+    );
+  }
+  if (!stagedResult.canonicalReceipt) {
+    throw createStagedImageExtractionError_(
+      'canonical',
+      'CANONICAL_GATE_REJECTED',
+    );
+  }
+
+  return stagedResult.canonicalReceipt;
+}
+
+function buildForwardPricedAnchorCanonicalReceiptOrThrow_(stagedResult) {
+  const boundedRelease =
+    buildForwardPricedAnchorCanonicalRelease_(stagedResult);
+
+  if (!boundedRelease.releaseStatus.eligible) {
+    throw createStagedImageExtractionError_(
+      'canonical',
+      firstStagedIssueCode_(
+        boundedRelease.conflicts,
+        'FORWARD_PRICED_ANCHOR_RELEASE_REJECTED',
+      ),
+    );
+  }
+
+  return boundedRelease.canonicalReceipt;
+}
+
+function firstStagedIssueCode_(issues, fallbackCode) {
+  return Array.isArray(issues) && issues.length > 0 && issues[0].code
+    ? issues[0].code
+    : fallbackCode;
+}
+
+function createStagedImageExtractionError_(stage, code) {
+  const error = new Error(
+    'Staged image receipt extraction failed [' + stage + ':' + code + '].',
+  );
+  error.name = 'StagedImageExtractionError';
+  error.stage = stage;
+  error.code = code;
+  return error;
 }
 
 function buildOpenAIReceiptPayload(mimeType, base64Data) {
@@ -140,6 +292,304 @@ function buildOpenAIReceiptPayload(mimeType, base64Data) {
     ],
     temperature: OPENAI.temperature,
   };
+}
+
+function buildOpenAIStage1V2Payload_(mimeType, base64Data) {
+  const prompt =
+    "Produce Stage-1-v2 literal visual evidence for this receipt image. " +
+    "Inspect the complete printed product area, including its title and column-header lines, every physical product-description line, and the nearby printed product-count and total lines. " +
+    "Return exactly one observedLines entry for every relevant physical printed line in visual top-to-bottom order. " +
+    "Preserve the complete physical line in rawText as literally as possible, including punctuation and decimal separators. " +
+    "For each line, copy only text visibly present on that same physical line into leadingQuantityText, descriptionText, unitPriceText, and lineTotalText; use null when a column is blank or not visible. " +
+    "Do not create canonical products. Do not merge physical lines. Do not move a quantity or price between lines. " +
+    "Do not calculate, reconcile, correct, or repair arithmetic. Do not use a printed total or product count to change any line observation. " +
+    'Classify roleEvidence only as "header", "product", "summary", or "unknown". ' +
+    'roleEvidence is perception evidence, not authoritative truth; use roleEvidence "unknown" whenever the visual role is uncertain. ' +
+    "For printedProductCount and printedTotal, preserve rawText and separately copy the visible labelText and valueText, linking each object to its physical observed line through sourceLineOrder. " +
+    'For printedTotal, totalTypeEvidence may be "inclVAT" or "exclVAT" only when that meaning is visually explicit; otherwise totalTypeEvidence must be null. ' +
+    'Never infer "inclVAT" merely from a label such as "Totaal". ' +
+    "Return only the JSON object required by the response schema.";
+
+  return {
+    model: OPENAI.model,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:" + mimeType + ";base64," + base64Data,
+            },
+          },
+        ],
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "stage1_v2_receipt_evidence",
+        strict: true,
+        schema: buildStage1V2JsonSchema_(),
+      },
+    },
+    temperature: OPENAI.temperature,
+  };
+}
+
+function buildStage1V2JsonSchema_() {
+  const nullableString = { type: ["string", "null"] };
+  const summaryBaseProperties = {
+    sourceLineOrder: { type: "integer", minimum: 1 },
+    rawText: { type: "string" },
+    labelText: { type: "string" },
+    valueText: { type: "string" },
+  };
+  const productCountEvidence = {
+    type: "object",
+    additionalProperties: false,
+    properties: summaryBaseProperties,
+    required: ["sourceLineOrder", "rawText", "labelText", "valueText"],
+  };
+  const totalEvidence = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      sourceLineOrder: summaryBaseProperties.sourceLineOrder,
+      rawText: summaryBaseProperties.rawText,
+      labelText: summaryBaseProperties.labelText,
+      valueText: summaryBaseProperties.valueText,
+      totalTypeEvidence: {
+        type: ["string", "null"],
+        enum: ["inclVAT", "exclVAT", null],
+      },
+    },
+    required: [
+      "sourceLineOrder",
+      "rawText",
+      "labelText",
+      "valueText",
+      "totalTypeEvidence",
+    ],
+  };
+
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      observedLines: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            order: { type: "integer", minimum: 1 },
+            rawText: { type: "string" },
+            leadingQuantityText: nullableString,
+            descriptionText: nullableString,
+            unitPriceText: nullableString,
+            lineTotalText: nullableString,
+            indentation: {
+              type: "string",
+              enum: ["left_aligned", "indented", "unclear"],
+            },
+            roleEvidence: {
+              type: "string",
+              enum: ["header", "product", "summary", "unknown"],
+            },
+          },
+          required: [
+            "order",
+            "rawText",
+            "leadingQuantityText",
+            "descriptionText",
+            "unitPriceText",
+            "lineTotalText",
+            "indentation",
+            "roleEvidence",
+          ],
+        },
+      },
+      summaryEvidence: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          printedProductCount: {
+            anyOf: [productCountEvidence, { type: "null" }],
+          },
+          printedTotal: {
+            anyOf: [totalEvidence, { type: "null" }],
+          },
+        },
+        required: ["printedProductCount", "printedTotal"],
+      },
+    },
+    required: ["observedLines", "summaryEvidence"],
+  };
+}
+
+function parseOpenAIStage1V2Response_(responseText) {
+  return parseOpenAIStage1V2Envelope_(responseText).evidence;
+}
+
+function parseOpenAIStage1V2Envelope_(responseText) {
+  let responseJson;
+  try {
+    responseJson = JSON.parse(responseText);
+  } catch (error) {
+    throw new Error("OpenAI Stage-1-v2 response was not valid JSON.");
+  }
+
+  const choice =
+    responseJson &&
+    Array.isArray(responseJson.choices) &&
+    responseJson.choices.length > 0
+      ? responseJson.choices[0]
+      : null;
+  const content =
+    choice && choice.message && typeof choice.message.content === "string"
+      ? choice.message.content
+      : "";
+
+  if (content.trim() === "") {
+    throw new Error("OpenAI Stage-1-v2 returned no JSON evidence content.");
+  }
+
+  let evidence;
+  try {
+    evidence = JSON.parse(content);
+  } catch (error) {
+    throw new Error("OpenAI Stage-1-v2 content was not valid JSON evidence.");
+  }
+
+  validateStage1V2Evidence_(evidence);
+  return { responseJson: responseJson, evidence: evidence };
+}
+
+function validateStage1V2Evidence_(evidence) {
+  assertStage1V2PlainObject_(evidence, "evidence");
+  assertStage1V2ExactKeys_(
+    evidence,
+    ["observedLines", "summaryEvidence"],
+    "evidence",
+  );
+
+  if (!Array.isArray(evidence.observedLines)) {
+    throw new Error("Stage-1-v2 evidence.observedLines must be an array.");
+  }
+
+  evidence.observedLines.forEach(function (line, index) {
+    const path = "observedLines[" + index + "]";
+    assertStage1V2PlainObject_(line, path);
+    assertStage1V2ExactKeys_(
+      line,
+      [
+        "order",
+        "rawText",
+        "leadingQuantityText",
+        "descriptionText",
+        "unitPriceText",
+        "lineTotalText",
+        "indentation",
+        "roleEvidence",
+      ],
+      path,
+    );
+
+    if (!Number.isInteger(line.order) || line.order <= 0) {
+      throw new Error("Stage-1-v2 " + path + ".order must be a positive integer.");
+    }
+    if (typeof line.rawText !== "string") {
+      throw new Error("Stage-1-v2 " + path + ".rawText must be a string.");
+    }
+    [
+      "leadingQuantityText",
+      "descriptionText",
+      "unitPriceText",
+      "lineTotalText",
+    ].forEach(function (fieldName) {
+      const value = line[fieldName];
+      if (value !== null && typeof value !== "string") {
+        throw new Error(
+          "Stage-1-v2 " + path + "." + fieldName +
+            " must be a string or null.",
+        );
+      }
+    });
+    if (
+      ["left_aligned", "indented", "unclear"].indexOf(line.indentation) < 0
+    ) {
+      throw new Error("Stage-1-v2 " + path + ".indentation is unsupported.");
+    }
+    if (
+      ["header", "product", "summary", "unknown"].indexOf(
+        line.roleEvidence,
+      ) < 0
+    ) {
+      throw new Error("Stage-1-v2 " + path + ".roleEvidence is unsupported.");
+    }
+  });
+
+  assertStage1V2PlainObject_(evidence.summaryEvidence, "summaryEvidence");
+  assertStage1V2ExactKeys_(
+    evidence.summaryEvidence,
+    ["printedProductCount", "printedTotal"],
+    "summaryEvidence",
+  );
+  validateStage1V2SummaryObject_(
+    evidence.summaryEvidence.printedProductCount,
+    "summaryEvidence.printedProductCount",
+    false,
+  );
+  validateStage1V2SummaryObject_(
+    evidence.summaryEvidence.printedTotal,
+    "summaryEvidence.printedTotal",
+    true,
+  );
+}
+
+function validateStage1V2SummaryObject_(evidence, path, isTotal) {
+  if (evidence === null) return;
+
+  assertStage1V2PlainObject_(evidence, path);
+  const keys = ["sourceLineOrder", "rawText", "labelText", "valueText"];
+  if (isTotal) keys.push("totalTypeEvidence");
+  assertStage1V2ExactKeys_(evidence, keys, path);
+
+  if (!Number.isInteger(evidence.sourceLineOrder) || evidence.sourceLineOrder <= 0) {
+    throw new Error("Stage-1-v2 " + path + ".sourceLineOrder is invalid.");
+  }
+  ["rawText", "labelText", "valueText"].forEach(function (fieldName) {
+    if (typeof evidence[fieldName] !== "string") {
+      throw new Error(
+        "Stage-1-v2 " + path + "." + fieldName + " must be a string.",
+      );
+    }
+  });
+
+  if (
+    isTotal &&
+    evidence.totalTypeEvidence !== null &&
+    evidence.totalTypeEvidence !== "inclVAT" &&
+    evidence.totalTypeEvidence !== "exclVAT"
+  ) {
+    throw new Error("Stage-1-v2 " + path + ".totalTypeEvidence is unsupported.");
+  }
+}
+
+function assertStage1V2PlainObject_(value, path) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Stage-1-v2 " + path + " must be an object.");
+  }
+}
+
+function assertStage1V2ExactKeys_(value, allowedKeys, path) {
+  const keys = Object.keys(value).sort();
+  const expected = allowedKeys.slice().sort();
+  if (JSON.stringify(keys) !== JSON.stringify(expected)) {
+    throw new Error("Stage-1-v2 " + path + " has invalid fields.");
+  }
 }
 
 function buildOpenAIPdfPayload(mimeType, base64Data) {
