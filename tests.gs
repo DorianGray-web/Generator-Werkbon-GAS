@@ -73,8 +73,8 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "Stage-1-v3 projection",
       "Stage-1-v3 request diagnostic",
     ],
-    expectedTestCount: 35,
-    expectedAssertionCount: 208,
+    expectedTestCount: 40,
+    expectedAssertionCount: 242,
   },
   {
     batchName: "staged-table-evidence-diagnostics",
@@ -205,9 +205,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 117 ||
-    new Set(names).size !== 117 ||
-    expectedAssertionTotal !== 544 ||
+    registrations.length !== 122 ||
+    new Set(names).size !== 122 ||
+    expectedAssertionTotal !== 578 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -10253,7 +10253,8 @@ function doGet(options) {
       assert.ok(
         result.source.fileId === "explicit-test-id" &&
           result.source.fileName === "bounded-test.png" &&
-          result.source.sha256 === "bounded-test-sha256",
+          result.source.sha256 ===
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       );
       assert.equal("classification" in result, false);
       assert.ok(diagnosticSource.indexOf("projectStage1V3ToObservedLines_") >= 0);
@@ -10270,6 +10271,221 @@ function doGet(options) {
           return diagnosticSource.indexOf(forbiddenName) < 0;
         }),
       );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — configured control identity is exact and accepts a match",
+    function (assert) {
+      const actual = {
+        mimeType: "image/jpeg",
+        blobByteLength: 2212780,
+        sha256:
+          "4064dd4df70a049b36924cc19e5b81685e40d177af062d5324eaff06195efd12",
+      };
+
+      assert.equal(
+        STAGE1_V3_DIAGNOSTIC_CONTROL_IDENTITY_.mimeType,
+        "image/jpeg",
+      );
+      assert.equal(
+        STAGE1_V3_DIAGNOSTIC_CONTROL_IDENTITY_.byteLength,
+        2212780,
+      );
+      assert.equal(
+        STAGE1_V3_DIAGNOSTIC_CONTROL_IDENTITY_.sha256,
+        "4064dd4df70a049b36924cc19e5b81685e40d177af062d5324eaff06195efd12",
+      );
+      assert.ok(
+        assertStage1V3DiagnosticSourceIdentity_(
+          actual,
+          STAGE1_V3_DIAGNOSTIC_CONTROL_IDENTITY_,
+        ) === undefined,
+      );
+      assert.ok(
+        runStage1V3ImageRequestDiagnostic.toString().indexOf(
+          "STAGE1_V3_DIAGNOSTIC_CONTROL_IDENTITY_",
+        ) >= 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — malformed control identity fails closed",
+    function (assert) {
+      const validSha =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const malformedExpectations = [
+        null,
+        {},
+        { mimeType: "", byteLength: 3, sha256: validSha },
+        { mimeType: "image/png", byteLength: 0, sha256: validSha },
+        { mimeType: "image/png", byteLength: 2.5, sha256: validSha },
+        { mimeType: "image/png", byteLength: 3 },
+        { mimeType: "image/png", byteLength: 3, sha256: "not-a-sha" },
+      ];
+
+      malformedExpectations.forEach(function (expected) {
+        assert.throws(function () {
+          assertStage1V3DiagnosticSourceIdentity_({}, expected);
+        }, /INVALID_CONTROL_ARTIFACT_IDENTITY/);
+      });
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — every identity mismatch blocks credentials and transport",
+    function (assert) {
+      const actualSha =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const mismatchCases = [
+        {
+          expected: {
+            mimeType: "image/jpeg",
+            byteLength: 3,
+            sha256: actualSha,
+          },
+          errorPattern: /CONTROL_ARTIFACT_MISMATCH_MIME/,
+        },
+        {
+          expected: {
+            mimeType: "image/png",
+            byteLength: 4,
+            sha256: actualSha,
+          },
+          errorPattern: /CONTROL_ARTIFACT_MISMATCH_BLOB_BYTE_LENGTH/,
+        },
+        {
+          expected: {
+            mimeType: "image/png",
+            byteLength: 3,
+            sha256:
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          },
+          errorPattern: /CONTROL_ARTIFACT_MISMATCH_SHA256/,
+        },
+      ];
+
+      mismatchCases.forEach(function (mismatchCase) {
+        let keyReadCount = 0;
+        let requestCount = 0;
+        const dependencies = stage1V3DiagnosticDependencyFixture_(
+          minimalStage1V3PhysicalEvidenceFixture(),
+          null,
+          null,
+        );
+        dependencies.expectedSourceIdentity = mismatchCase.expected;
+        dependencies.getOpenAIApiKey = function () {
+          keyReadCount += 1;
+        };
+        dependencies.request = function () {
+          requestCount += 1;
+        };
+
+        assert.throws(function () {
+          runStage1V3ImageRequestDiagnosticForFileId_(
+            "explicit-test-id",
+            dependencies,
+          );
+        }, mismatchCase.errorPattern);
+        assert.equal(keyReadCount, 0);
+        assert.equal(requestCount, 0);
+      });
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — matched control proceeds using the same exact blob bytes",
+    function (assert) {
+      const exactBytes = [7, 8, 9, 10];
+      const exactSha =
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+      let blobReadCount = 0;
+      let hashedBytes = null;
+      let encodedBytes = null;
+      let keyReadCount = 0;
+      let requestCount = 0;
+      let requestMimeType = null;
+      let requestBase64 = null;
+      const dependencies = stage1V3DiagnosticDependencyFixture_(
+        minimalStage1V3PhysicalEvidenceFixture(),
+        {
+          resolved: false,
+          evidence: null,
+          conflicts: [],
+          sourceMap: { rows: [], summaries: {} },
+          accounting: {},
+        },
+        null,
+      );
+      dependencies.expectedSourceIdentity = {
+        mimeType: "image/jpeg",
+        byteLength: exactBytes.length,
+        sha256: exactSha,
+      };
+      dependencies.getFileById = function () {
+        return {
+          getMimeType: function () { return "image/jpeg"; },
+          getBlob: function () {
+            blobReadCount += 1;
+            return { getBytes: function () { return exactBytes; } };
+          },
+          getName: function () { return "bounded-control.jpg"; },
+          getSize: function () { return exactBytes.length; },
+        };
+      };
+      dependencies.computeSha256Hex = function (sourceBytes) {
+        hashedBytes = sourceBytes;
+        return exactSha;
+      };
+      dependencies.base64Encode = function (sourceBytes) {
+        encodedBytes = sourceBytes;
+        return "same-bytes-token";
+      };
+      dependencies.getOpenAIApiKey = function () {
+        keyReadCount += 1;
+        return null;
+      };
+      dependencies.request = function (mimeType, base64Data) {
+        requestCount += 1;
+        requestMimeType = mimeType;
+        requestBase64 = base64Data;
+        return {
+          requestedModel: "gpt-4o-2024-08-06",
+          responseJson: { choices: [{ finish_reason: "stop" }] },
+          evidence: minimalStage1V3PhysicalEvidenceFixture(),
+        };
+      };
+
+      const result = runStage1V3ImageRequestDiagnosticForFileId_(
+        "explicit-test-id",
+        dependencies,
+      );
+
+      assert.equal(blobReadCount, 1);
+      assert.ok(hashedBytes === exactBytes);
+      assert.ok(encodedBytes === exactBytes);
+      assert.equal(keyReadCount, 1);
+      assert.equal(requestCount, 1);
+      assert.equal(requestMimeType, "image/jpeg");
+      assert.equal(requestBase64, "same-bytes-token");
+      assert.equal(result.source.blobByteLength, exactBytes.length);
+      assert.equal(result.source.sha256, exactSha);
+      assert.ok(result.transportSuccess);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — source guard precedes credential and request boundaries",
+    function (assert) {
+      const source = runStage1V3ImageRequestDiagnosticForFileId_.toString();
+      const guardIndex = source.indexOf(
+        "assertStage1V3DiagnosticSourceIdentity_",
+      );
+
+      assert.ok(guardIndex >= 0);
+      assert.ok(guardIndex < source.indexOf("getOpenAIApiKey"));
+      assert.ok(guardIndex < source.indexOf("makeRequest"));
     },
   );
 
@@ -12451,6 +12667,12 @@ function buildStage1V2OpenAIMetadata_(responseJson) {
 
 const STAGE1_V3_DIAGNOSTIC_FILE_ID_PROPERTY =
   "STAGE1_V3_DIAGNOSTIC_FILE_ID";
+const STAGE1_V3_DIAGNOSTIC_CONTROL_IDENTITY_ = Object.freeze({
+  mimeType: "image/jpeg",
+  byteLength: 2212780,
+  sha256:
+    "4064dd4df70a049b36924cc19e5b81685e40d177af062d5324eaff06195efd12",
+});
 
 /**
  * Manual-only entry point for one isolated Stage-1-v3 image request.
@@ -12460,7 +12682,9 @@ function runStage1V3ImageRequestDiagnostic() {
   const fileId = getRequiredScriptProperty(
     STAGE1_V3_DIAGNOSTIC_FILE_ID_PROPERTY,
   );
-  return runStage1V3ImageRequestDiagnosticForFileId_(fileId);
+  return runStage1V3ImageRequestDiagnosticForFileId_(fileId, {
+    expectedSourceIdentity: STAGE1_V3_DIAGNOSTIC_CONTROL_IDENTITY_,
+  });
 }
 
 /**
@@ -12506,6 +12730,10 @@ function runStage1V3ImageRequestDiagnosticForFileId_(fileId, dependencies) {
     blobByteLength: bytes.length,
     sha256: computeSha256(bytes),
   };
+  assertStage1V3DiagnosticSourceIdentity_(
+    source,
+    runtime.expectedSourceIdentity,
+  );
 
   const getOpenAIApiKey =
     typeof runtime.getOpenAIApiKey === "function"
@@ -12573,6 +12801,40 @@ function runStage1V3ImageRequestDiagnosticForFileId_(fileId, dependencies) {
   return result;
 }
 
+function assertStage1V3DiagnosticSourceIdentity_(actual, expected) {
+  const expectedIsValid =
+    expected &&
+    typeof expected.mimeType === "string" &&
+    expected.mimeType !== "" &&
+    Number.isInteger(expected.byteLength) &&
+    expected.byteLength > 0 &&
+    typeof expected.sha256 === "string" &&
+    /^[0-9a-f]{64}$/.test(expected.sha256);
+  if (!expectedIsValid) {
+    throw createStage1V3DiagnosticError_(
+      "preflight",
+      "INVALID_CONTROL_ARTIFACT_IDENTITY",
+    );
+  }
+
+  const mismatches = [];
+  if (!actual || actual.mimeType !== expected.mimeType) {
+    mismatches.push("MIME");
+  }
+  if (!actual || actual.blobByteLength !== expected.byteLength) {
+    mismatches.push("BLOB_BYTE_LENGTH");
+  }
+  if (!actual || actual.sha256 !== expected.sha256) {
+    mismatches.push("SHA256");
+  }
+  if (mismatches.length > 0) {
+    throw createStage1V3DiagnosticError_(
+      "preflight",
+      "CONTROL_ARTIFACT_MISMATCH_" + mismatches.join("_"),
+    );
+  }
+}
+
 function buildStage1V3DiagnosticResponseMetadata_(
   requestedModel,
   responseJson,
@@ -12624,6 +12886,8 @@ function stage1V3DiagnosticDependencyFixture_(
   projectionResult,
   candidateBuilder,
 ) {
+  const syntheticSha256 =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   return {
     getFileById: function () {
       return {
@@ -12635,8 +12899,13 @@ function stage1V3DiagnosticDependencyFixture_(
         getSize: function () { return 3; },
       };
     },
-    computeSha256Hex: function () { return "bounded-test-sha256"; },
+    computeSha256Hex: function () { return syntheticSha256; },
     base64Encode: function () { return "bounded-test-data"; },
+    expectedSourceIdentity: {
+      mimeType: "image/png",
+      byteLength: 3,
+      sha256: syntheticSha256,
+    },
     getOpenAIApiKey: function () { return null; },
     request: function () {
       return {
