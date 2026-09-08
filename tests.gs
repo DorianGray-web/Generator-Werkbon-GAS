@@ -67,9 +67,9 @@ const QUNIT_STAGED_BATCH_PARTITION = [
   },
   {
     batchName: "staged-stage1-diagnostics",
-    testNamePrefixes: ["Stage-1-v2 diagnostic"],
-    expectedTestCount: 5,
-    expectedAssertionCount: 19,
+    testNamePrefixes: ["Stage-1-v2 diagnostic", "Stage-1-v3 contract"],
+    expectedTestCount: 15,
+    expectedAssertionCount: 72,
   },
   {
     batchName: "staged-table-evidence-diagnostics",
@@ -200,9 +200,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 87 ||
-    new Set(names).size !== 87 ||
-    expectedAssertionTotal !== 355 ||
+    registrations.length !== 97 ||
+    new Set(names).size !== 97 ||
+    expectedAssertionTotal !== 408 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -2384,6 +2384,182 @@ function doGet(options) {
         },
       },
     };
+  }
+
+  function stage1V3CellFixture(
+    cellId,
+    columnOrder,
+    rawText,
+    headerCellRef,
+    meaningEvidence,
+  ) {
+    return {
+      cellId: cellId,
+      columnOrder: columnOrder,
+      rawText: rawText,
+      emptyEvidence: rawText === "",
+      headerCellRef: headerCellRef,
+      meaningEvidence: meaningEvidence,
+    };
+  }
+
+  function stage1V3RowFixture(
+    rowId,
+    order,
+    rawText,
+    indentationEvidence,
+    roleEvidence,
+    cells,
+  ) {
+    return {
+      rowId: rowId,
+      order: order,
+      rawText: rawText,
+      indentationEvidence: indentationEvidence,
+      roleEvidence: roleEvidence,
+      cells: cells,
+    };
+  }
+
+  function minimalStage1V3PhysicalEvidenceFixture() {
+    return {
+      schemaVersion: "stage1-v3",
+      physicalRows: [
+        stage1V3RowFixture(
+          "row-1",
+          1,
+          "  literal evidence  ",
+          "unclear",
+          "unknown",
+          [
+            stage1V3CellFixture(
+              "cell-1",
+              1,
+              "  literal evidence  ",
+              null,
+              "other",
+            ),
+          ],
+        ),
+      ],
+      summaryEvidence: {
+        printedProductCount: null,
+        printedTotal: null,
+      },
+    };
+  }
+
+  function multiRowStage1V3PhysicalEvidenceFixture() {
+    return {
+      schemaVersion: "stage1-v3",
+      physicalRows: [
+        stage1V3RowFixture(
+          "header-row",
+          1,
+          "Aantal Omschrijving €/stuk €",
+          "left_aligned",
+          "header",
+          [
+            stage1V3CellFixture("h-quantity", 1, "Aantal", null, "other"),
+            stage1V3CellFixture("h-description", 2, "Omschrijving", null, "other"),
+            stage1V3CellFixture("h-unit", 3, "€/stuk", null, "other"),
+            stage1V3CellFixture("h-total", 4, "€", null, "other"),
+          ],
+        ),
+        stage1V3RowFixture(
+          "product-row",
+          2,
+          "1 Synthetic item 15,99 15,99",
+          "left_aligned",
+          "product",
+          [
+            stage1V3CellFixture("p-quantity", 1, "1", "h-quantity", "quantity"),
+            stage1V3CellFixture("p-description", 2, "Synthetic item", "h-description", "description"),
+            stage1V3CellFixture("p-unit", 3, "15,99", "h-unit", "unit_price"),
+            stage1V3CellFixture("p-total", 4, "15,99", "h-total", "line_total"),
+          ],
+        ),
+        stage1V3RowFixture(
+          "uncertain-row",
+          3,
+          "detail",
+          "indented",
+          "unknown",
+          [
+            stage1V3CellFixture("u-empty-quantity", 1, "", "h-quantity", "unknown"),
+            stage1V3CellFixture("u-description", 2, "detail", "h-description", "unknown"),
+            stage1V3CellFixture("u-empty-unit", 3, "", "h-unit", "unknown"),
+            stage1V3CellFixture("u-empty-total", 4, "", "h-total", "unknown"),
+          ],
+        ),
+        stage1V3RowFixture(
+          "total-row",
+          4,
+          "Totaal 81,54",
+          "left_aligned",
+          "summary",
+          [
+            stage1V3CellFixture("total-label", 1, "Totaal", null, "summary_label"),
+            stage1V3CellFixture("total-value", 2, "81,54", null, "summary_value"),
+          ],
+        ),
+        stage1V3RowFixture(
+          "count-row",
+          5,
+          "Aantal producten: 6",
+          "left_aligned",
+          "summary",
+          [
+            stage1V3CellFixture("count-label", 1, "Aantal producten:", null, "summary_label"),
+            stage1V3CellFixture("count-value", 2, "6", null, "summary_value"),
+          ],
+        ),
+      ],
+      summaryEvidence: {
+        printedProductCount: {
+          sourceRowId: "count-row",
+          labelCellRefs: ["count-label"],
+          valueCellRefs: ["count-value"],
+        },
+        printedTotal: {
+          sourceRowId: "total-row",
+          labelCellRefs: ["total-label"],
+          valueCellRefs: ["total-value"],
+          totalTypeEvidence: null,
+        },
+      },
+    };
+  }
+
+  function stage1V3OpenAIResponseFixture(evidence) {
+    return JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify(evidence),
+          },
+        },
+      ],
+    });
+  }
+
+  function assertStage1V3ValidationRejects(
+    assert,
+    evidence,
+    expectedMessageFragment,
+  ) {
+    let caught = null;
+    try {
+      validateStage1V3PhysicalEvidence_(evidence);
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(
+      Boolean(
+        caught &&
+          caught.message.indexOf(expectedMessageFragment) >= 0,
+      ),
+    );
   }
 
   function controlledHuboOneItemStage1V2Fixture() {
@@ -8799,6 +8975,314 @@ function doGet(options) {
       assert.equal(result.groupCount, 1);
       assert.ok(compactJsonEquality(result.groupSourceRowOrders, [[1]]));
       assert.notOk("canonicalReceiptProduced" in result);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — schema exposes physical evidence without canonical semantics",
+    function (assert) {
+      const schema = buildStage1V3PhysicalEvidenceJsonSchema_();
+      const rowSchema = schema.properties.physicalRows.items;
+      const cellSchema = rowSchema.properties.cells.items;
+      const schemaText = JSON.stringify(schema);
+
+      assert.ok(compactJsonEquality(schema.required, [
+        "schemaVersion",
+        "physicalRows",
+        "summaryEvidence",
+      ]));
+      assert.ok(compactJsonEquality(
+        schema.properties.schemaVersion.enum,
+        ["stage1-v3"],
+      ));
+      assert.ok(compactJsonEquality(rowSchema.required, [
+        "rowId",
+        "order",
+        "rawText",
+        "indentationEvidence",
+        "roleEvidence",
+        "cells",
+      ]));
+      assert.ok(cellSchema.properties.meaningEvidence.enum.indexOf("unknown") >= 0);
+      assert.ok(
+        schemaText.indexOf("canonicalReceipt") < 0 &&
+          schemaText.indexOf("observedLines") < 0 &&
+          schemaText.indexOf("unitPriceText") < 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — minimal evidence preserves strings and nullable summaries",
+    function (assert) {
+      const evidence = minimalStage1V3PhysicalEvidenceFixture();
+      const snapshot = JSON.stringify(evidence);
+      const validated = validateStage1V3PhysicalEvidence_(evidence);
+
+      assert.ok(validated === evidence);
+      assert.equal(validated.physicalRows.length, 1);
+      assert.ok(compactJsonEquality(validated.summaryEvidence, {
+        printedProductCount: null,
+        printedTotal: null,
+      }));
+      assert.equal(validated.physicalRows[0].rawText, "  literal evidence  ");
+      assert.equal(
+        validated.physicalRows[0].cells[0].rawText,
+        "  literal evidence  ",
+      );
+      assert.ok(JSON.stringify(evidence) === snapshot);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — parser freezes valid multi-row evidence without interpretation",
+    function (assert) {
+      const source = multiRowStage1V3PhysicalEvidenceFixture();
+      const sourceSnapshot = JSON.stringify(source);
+      const parsed = parseOpenAIStage1V3Response_(
+        stage1V3OpenAIResponseFixture(source),
+      );
+      const uncertainRow = parsed.physicalRows[2];
+
+      assert.ok(compactJsonEquality(
+        parsed.physicalRows.map(function (row) {
+          return row.order;
+        }),
+        [1, 2, 3, 4, 5],
+      ));
+      assert.ok(compactJsonEquality(
+        parsed.physicalRows.map(function (row) {
+          return row.rawText;
+        }),
+        [
+          "Aantal Omschrijving €/stuk €",
+          "1 Synthetic item 15,99 15,99",
+          "detail",
+          "Totaal 81,54",
+          "Aantal producten: 6",
+        ],
+      ));
+      assert.equal(uncertainRow.roleEvidence, "unknown");
+      assert.equal(uncertainRow.cells[1].meaningEvidence, "unknown");
+      assert.ok(compactJsonEquality(
+        {
+          rawText: uncertainRow.cells[0].rawText,
+          emptyEvidence: uncertainRow.cells[0].emptyEvidence,
+        },
+        { rawText: "", emptyEvidence: true },
+      ));
+      assert.ok(compactJsonEquality(
+        uncertainRow.cells.map(function (cell) {
+          return cell.headerCellRef;
+        }),
+        ["h-quantity", "h-description", "h-unit", "h-total"],
+      ));
+      assert.ok(compactJsonEquality(parsed.summaryEvidence.printedTotal, {
+        sourceRowId: "total-row",
+        labelCellRefs: ["total-label"],
+        valueCellRefs: ["total-value"],
+        totalTypeEvidence: null,
+      }));
+      assert.equal(
+        parsed.summaryEvidence.printedTotal.totalTypeEvidence,
+        null,
+      );
+      assert.ok(Object.isFrozen(parsed));
+      assert.ok(
+        Object.isFrozen(parsed.physicalRows) &&
+          Object.isFrozen(parsed.physicalRows[1].cells) &&
+          Object.isFrozen(parsed.physicalRows[1].cells[2]),
+      );
+      assert.ok(JSON.stringify(parsed) === sourceSnapshot);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — rejects version and top-level allowlist violations",
+    function (assert) {
+      const wrongVersion = minimalStage1V3PhysicalEvidenceFixture();
+      wrongVersion.schemaVersion = "stage1-v2";
+      assertStage1V3ValidationRejects(assert, wrongVersion, "schemaVersion");
+
+      const unexpected = minimalStage1V3PhysicalEvidenceFixture();
+      unexpected.unexpected = true;
+      assertStage1V3ValidationRejects(assert, unexpected, "invalid fields");
+
+      const missing = minimalStage1V3PhysicalEvidenceFixture();
+      delete missing.summaryEvidence;
+      assertStage1V3ValidationRejects(assert, missing, "invalid fields");
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — rejects duplicate identities and non-increasing order",
+    function (assert) {
+      const duplicateRow = multiRowStage1V3PhysicalEvidenceFixture();
+      duplicateRow.physicalRows[1].rowId = "header-row";
+      assertStage1V3ValidationRejects(assert, duplicateRow, "rowId is duplicated");
+
+      const duplicateCell = multiRowStage1V3PhysicalEvidenceFixture();
+      duplicateCell.physicalRows[1].cells[0].cellId = "h-quantity";
+      assertStage1V3ValidationRejects(assert, duplicateCell, "cellId is duplicated");
+
+      const rowOrder = multiRowStage1V3PhysicalEvidenceFixture();
+      rowOrder.physicalRows[1].order = 1;
+      assertStage1V3ValidationRejects(assert, rowOrder, ".order is invalid");
+
+      const columnOrder = multiRowStage1V3PhysicalEvidenceFixture();
+      columnOrder.physicalRows[0].cells[1].columnOrder = 1;
+      assertStage1V3ValidationRejects(
+        assert,
+        columnOrder,
+        ".columnOrder is invalid",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — rejects invalid annotations and contradictory emptiness",
+    function (assert) {
+      const indentation = minimalStage1V3PhysicalEvidenceFixture();
+      indentation.physicalRows[0].indentationEvidence = "centered";
+      assertStage1V3ValidationRejects(assert, indentation, "indentationEvidence");
+
+      const role = minimalStage1V3PhysicalEvidenceFixture();
+      role.physicalRows[0].roleEvidence = "canonical-product";
+      assertStage1V3ValidationRejects(assert, role, "roleEvidence");
+
+      const meaning = minimalStage1V3PhysicalEvidenceFixture();
+      meaning.physicalRows[0].cells[0].meaningEvidence = "net_total";
+      assertStage1V3ValidationRejects(assert, meaning, "meaningEvidence");
+
+      const emptyFalse = multiRowStage1V3PhysicalEvidenceFixture();
+      emptyFalse.physicalRows[2].cells[0].emptyEvidence = false;
+      assertStage1V3ValidationRejects(assert, emptyFalse, "emptyEvidence");
+
+      const nonEmptyTrue = minimalStage1V3PhysicalEvidenceFixture();
+      nonEmptyTrue.physicalRows[0].cells[0].emptyEvidence = true;
+      assertStage1V3ValidationRejects(assert, nonEmptyTrue, "emptyEvidence");
+
+      const emptyMeaning = multiRowStage1V3PhysicalEvidenceFixture();
+      emptyMeaning.physicalRows[2].cells[0].meaningEvidence = "quantity";
+      assertStage1V3ValidationRejects(
+        assert,
+        emptyMeaning,
+        "meaningEvidence contradicts empty evidence",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — validates only bounded earlier-header references",
+    function (assert) {
+      const dangling = multiRowStage1V3PhysicalEvidenceFixture();
+      dangling.physicalRows[1].cells[2].headerCellRef = "missing-header";
+      assertStage1V3ValidationRejects(assert, dangling, "matching earlier header");
+
+      const selfReference = minimalStage1V3PhysicalEvidenceFixture();
+      selfReference.physicalRows[0].cells[0].headerCellRef = "cell-1";
+      assertStage1V3ValidationRejects(assert, selfReference, "self-reference");
+
+      const nonHeader = multiRowStage1V3PhysicalEvidenceFixture();
+      nonHeader.physicalRows[1].cells[2].headerCellRef = "p-total";
+      assertStage1V3ValidationRejects(assert, nonHeader, "matching earlier header");
+
+      const laterHeader = multiRowStage1V3PhysicalEvidenceFixture();
+      const headerRow = laterHeader.physicalRows[0];
+      const productRow = laterHeader.physicalRows[1];
+      productRow.order = 1;
+      headerRow.order = 2;
+      laterHeader.physicalRows = [productRow, headerRow];
+      laterHeader.summaryEvidence.printedProductCount = null;
+      laterHeader.summaryEvidence.printedTotal = null;
+      assertStage1V3ValidationRejects(
+        assert,
+        laterHeader,
+        "matching earlier header",
+      );
+
+      const wrongColumn = multiRowStage1V3PhysicalEvidenceFixture();
+      wrongColumn.physicalRows[1].cells[2].headerCellRef = "h-total";
+      assertStage1V3ValidationRejects(
+        assert,
+        wrongColumn,
+        "matching earlier header",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — rejects invalid and duplicate summary references",
+    function (assert) {
+      const danglingRow = multiRowStage1V3PhysicalEvidenceFixture();
+      danglingRow.summaryEvidence.printedTotal.sourceRowId = "missing-row";
+      assertStage1V3ValidationRejects(assert, danglingRow, "sourceRowId");
+
+      const danglingCell = multiRowStage1V3PhysicalEvidenceFixture();
+      danglingCell.summaryEvidence.printedTotal.valueCellRefs = ["missing-cell"];
+      assertStage1V3ValidationRejects(assert, danglingCell, "cellRefs");
+
+      const wrongRow = multiRowStage1V3PhysicalEvidenceFixture();
+      wrongRow.summaryEvidence.printedTotal.sourceRowId = "count-row";
+      assertStage1V3ValidationRejects(assert, wrongRow, "another source row");
+
+      const duplicateLabel = multiRowStage1V3PhysicalEvidenceFixture();
+      duplicateLabel.summaryEvidence.printedTotal.labelCellRefs = [
+        "total-label",
+        "total-label",
+      ];
+      assertStage1V3ValidationRejects(assert, duplicateLabel, "duplicate cell refs");
+
+      const overlapping = multiRowStage1V3PhysicalEvidenceFixture();
+      overlapping.summaryEvidence.printedTotal.valueCellRefs = ["total-label"];
+      assertStage1V3ValidationRejects(assert, overlapping, "duplicate cell refs");
+
+      const emptyRefs = multiRowStage1V3PhysicalEvidenceFixture();
+      emptyRefs.summaryEvidence.printedProductCount.labelCellRefs = [];
+      assertStage1V3ValidationRejects(
+        assert,
+        emptyRefs,
+        "must contain label and value cell refs",
+      );
+
+      const totalType = multiRowStage1V3PhysicalEvidenceFixture();
+      totalType.summaryEvidence.printedTotal.totalTypeEvidence = "payable";
+      assertStage1V3ValidationRejects(assert, totalType, "totalTypeEvidence");
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — rejects malformed count and total summary objects",
+    function (assert) {
+      const countShape = multiRowStage1V3PhysicalEvidenceFixture();
+      countShape.summaryEvidence.printedProductCount.totalTypeEvidence = null;
+      assertStage1V3ValidationRejects(assert, countShape, "invalid fields");
+
+      const totalShape = multiRowStage1V3PhysicalEvidenceFixture();
+      delete totalShape.summaryEvidence.printedTotal.totalTypeEvidence;
+      assertStage1V3ValidationRejects(assert, totalShape, "invalid fields");
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 contract — rejects malformed empty and non-JSON envelopes",
+    function (assert) {
+      assert.throws(function () {
+        parseOpenAIStage1V3Response_("{");
+      }, /response was not valid JSON/);
+      assert.throws(function () {
+        parseOpenAIStage1V3Response_(JSON.stringify({ choices: [] }));
+      }, /returned no JSON evidence content/);
+      assert.throws(function () {
+        parseOpenAIStage1V3Response_(JSON.stringify({
+          choices: [{ message: { content: "   " } }],
+        }));
+      }, /returned no JSON evidence content/);
+      assert.throws(function () {
+        parseOpenAIStage1V3Response_(JSON.stringify({
+          choices: [{ message: { content: "not-json" } }],
+        }));
+      }, /content was not valid JSON evidence/);
     },
   );
 
