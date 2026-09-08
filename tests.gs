@@ -67,9 +67,13 @@ const QUNIT_STAGED_BATCH_PARTITION = [
   },
   {
     batchName: "staged-stage1-diagnostics",
-    testNamePrefixes: ["Stage-1-v2 diagnostic", "Stage-1-v3 contract"],
-    expectedTestCount: 15,
-    expectedAssertionCount: 72,
+    testNamePrefixes: [
+      "Stage-1-v2 diagnostic",
+      "Stage-1-v3 contract",
+      "Stage-1-v3 projection",
+    ],
+    expectedTestCount: 25,
+    expectedAssertionCount: 128,
   },
   {
     batchName: "staged-table-evidence-diagnostics",
@@ -200,9 +204,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 97 ||
-    new Set(names).size !== 97 ||
-    expectedAssertionTotal !== 408 ||
+    registrations.length !== 107 ||
+    new Set(names).size !== 107 ||
+    expectedAssertionTotal !== 464 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -2560,6 +2564,233 @@ function doGet(options) {
           caught.message.indexOf(expectedMessageFragment) >= 0,
       ),
     );
+  }
+
+  function stage1V3ProjectionEvidenceFixture(rows, summaryEvidence) {
+    return {
+      schemaVersion: "stage1-v3",
+      physicalRows: rows,
+      summaryEvidence: summaryEvidence || {
+        printedProductCount: null,
+        printedTotal: null,
+      },
+    };
+  }
+
+  function stage1V3ProjectionRowFixture(
+    rowId,
+    order,
+    rawText,
+    indentationEvidence,
+    roleEvidence,
+    cellSpecifications,
+  ) {
+    return stage1V3RowFixture(
+      rowId,
+      order,
+      rawText,
+      indentationEvidence,
+      roleEvidence,
+      cellSpecifications.map(function (specification, index) {
+        return stage1V3CellFixture(
+          specification[0],
+          index + 1,
+          specification[1],
+          specification.length > 3 ? specification[3] : null,
+          specification[2],
+        );
+      }),
+    );
+  }
+
+  function simpleStage1V3ProjectionFixture() {
+    return stage1V3ProjectionEvidenceFixture([
+      stage1V3ProjectionRowFixture(
+        "product-1",
+        1,
+        "  1 Synthetic part 15,99 15,99  ",
+        "left_aligned",
+        "product",
+        [
+          ["p1-q", "1", "quantity"],
+          ["p1-d", "Synthetic part", "description"],
+          ["p1-u", "15,99", "unit_price"],
+          ["p1-t", "15,99", "line_total"],
+        ],
+      ),
+    ]);
+  }
+
+  function stage1V3AnchorContinuationProjectionFixture() {
+    return stage1V3ProjectionEvidenceFixture([
+      stage1V3ProjectionRowFixture(
+        "anchor-1",
+        1,
+        "1 Synthetic anchor 15,99 15,99",
+        "left_aligned",
+        "product",
+        [
+          ["a1-q", "1", "quantity"],
+          ["a1-d", "Synthetic anchor", "description"],
+          ["a1-u", "15,99", "unit_price"],
+          ["a1-t", "15,99", "line_total"],
+        ],
+      ),
+      stage1V3ProjectionRowFixture(
+        "continuation-1",
+        2,
+        "1 continuation detail",
+        "indented",
+        "product",
+        [
+          ["c1-q", "1", "quantity"],
+          ["c1-d", "continuation detail", "description"],
+        ],
+      ),
+    ]);
+  }
+
+  function stage1V3SummaryProjectionFixture(totalTypeEvidence) {
+    const rows = [
+      stage1V3ProjectionRowFixture(
+        "total-row-v3",
+        1,
+        "Totaal 81,54",
+        "left_aligned",
+        "summary",
+        [
+          ["total-label-v3", "Totaal", "summary_label"],
+          ["total-value-v3", "81,54", "summary_value"],
+        ],
+      ),
+      stage1V3ProjectionRowFixture(
+        "count-row-v3",
+        2,
+        "Aantal producten: 6",
+        "left_aligned",
+        "summary",
+        [
+          ["count-label-v3", "Aantal producten:", "summary_label"],
+          ["count-value-v3", "6", "summary_value"],
+        ],
+      ),
+    ];
+    return stage1V3ProjectionEvidenceFixture(rows, {
+      printedProductCount: {
+        sourceRowId: "count-row-v3",
+        labelCellRefs: ["count-label-v3"],
+        valueCellRefs: ["count-value-v3"],
+      },
+      printedTotal: {
+        sourceRowId: "total-row-v3",
+        labelCellRefs: ["total-label-v3"],
+        valueCellRefs: ["total-value-v3"],
+        totalTypeEvidence: totalTypeEvidence,
+      },
+    });
+  }
+
+  function sanitizedSixProductStage1V3ProjectionFixture() {
+    const rows = [
+      stage1V3ProjectionRowFixture(
+        "title-row",
+        1,
+        "**COLLECTION RECEIPT**",
+        "left_aligned",
+        "header",
+        [["title-cell", "**COLLECTION RECEIPT**", "other"]],
+      ),
+      stage1V3ProjectionRowFixture(
+        "columns-row",
+        2,
+        "€/unit €",
+        "left_aligned",
+        "header",
+        [
+          ["header-empty-q", "", "unknown"],
+          ["header-empty-d", "", "unknown"],
+          ["header-unit", "€/unit", "other"],
+          ["header-total", "€", "other"],
+        ],
+      ),
+    ];
+    const products = [
+      ["Part A", "detail A", "15,99"],
+      ["Part B", "detail B", "9,79"],
+      ["Part C", "detail C", "5,49"],
+      ["Part D", "detail D", "9,99"],
+      ["Part E", "detail E", "15,29"],
+      ["Part F", "detail F", "24,99"],
+    ];
+    products.forEach(function (product, index) {
+      const anchorOrder = 3 + index * 2;
+      const suffix = String(index + 1);
+      rows.push(stage1V3ProjectionRowFixture(
+        "anchor-" + suffix,
+        anchorOrder,
+        "1 " + product[0] + " " + product[2] + " " + product[2],
+        "left_aligned",
+        "product",
+        [
+          ["q-" + suffix, "1", "quantity"],
+          ["d-" + suffix, product[0], "description"],
+          ["u-" + suffix, product[2], "unit_price"],
+          ["t-" + suffix, product[2], "line_total"],
+        ],
+      ));
+      const continuationCells = [];
+      if (index === 0) {
+        continuationCells.push(["cq-" + suffix, "1", "quantity"]);
+      }
+      continuationCells.push([
+        "cd-" + suffix,
+        product[1],
+        "description",
+      ]);
+      rows.push(stage1V3ProjectionRowFixture(
+        "continuation-" + suffix,
+        anchorOrder + 1,
+        (index === 0 ? "1 " : "") + product[1],
+        "indented",
+        "product",
+        continuationCells,
+      ));
+    });
+    rows.push(stage1V3ProjectionRowFixture(
+      "total-row-six",
+      15,
+      "Totaal 81,54",
+      "left_aligned",
+      "summary",
+      [
+        ["total-label-six", "Totaal", "summary_label"],
+        ["total-value-six", "81,54", "summary_value"],
+      ],
+    ));
+    rows.push(stage1V3ProjectionRowFixture(
+      "count-row-six",
+      16,
+      "Aantal producten: 6",
+      "left_aligned",
+      "summary",
+      [
+        ["count-label-six", "Aantal producten:", "summary_label"],
+        ["count-value-six", "6", "summary_value"],
+      ],
+    ));
+    return stage1V3ProjectionEvidenceFixture(rows, {
+      printedProductCount: {
+        sourceRowId: "count-row-six",
+        labelCellRefs: ["count-label-six"],
+        valueCellRefs: ["count-value-six"],
+      },
+      printedTotal: {
+        sourceRowId: "total-row-six",
+        labelCellRefs: ["total-label-six"],
+        valueCellRefs: ["total-value-six"],
+        totalTypeEvidence: null,
+      },
+    });
   }
 
   function controlledHuboOneItemStage1V2Fixture() {
@@ -9283,6 +9514,408 @@ function doGet(options) {
           choices: [{ message: { content: "not-json" } }],
         }));
       }, /content was not valid JSON evidence/);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection — same-row fields and continuations remain literal",
+    function (assert) {
+      const input = stage1V3AnchorContinuationProjectionFixture();
+      const snapshot = JSON.stringify(input);
+      const result = projectStage1V3ToObservedLines_(input);
+      const anchor = result.evidence.observedLines[0];
+      const continuation = result.evidence.observedLines[1];
+
+      assert.ok(result.resolved);
+      assert.equal(result.evidence.observedLines.length, 2);
+      assert.ok(compactJsonEquality(anchor, {
+        order: 1,
+        rawText: "1 Synthetic anchor 15,99 15,99",
+        leadingQuantityText: "1",
+        descriptionText: "Synthetic anchor",
+        unitPriceText: "15,99",
+        lineTotalText: "15,99",
+        indentation: "left_aligned",
+        roleEvidence: "product",
+      }));
+      assert.ok(compactJsonEquality(continuation, {
+        order: 2,
+        rawText: "1 continuation detail",
+        leadingQuantityText: "1",
+        descriptionText: "continuation detail",
+        unitPriceText: null,
+        lineTotalText: null,
+        indentation: "indented",
+        roleEvidence: "product",
+      }));
+      assert.equal(anchor.rawText, input.physicalRows[0].rawText);
+      assert.ok(compactJsonEquality(
+        result.sourceMap.rows[0].fieldSources.unitPriceText,
+        { cellId: "a1-u", headerCellRef: null },
+      ));
+      assert.equal(
+        result.accounting.sourceCellCount,
+        result.accounting.accountedCellCount,
+      );
+      assert.notOk("groups" in result);
+      assert.ok(JSON.stringify(input) === snapshot);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection — bounded annotations copy without interpretation",
+    function (assert) {
+      const linkedInput = stage1V3ProjectionEvidenceFixture([
+        stage1V3ProjectionRowFixture(
+          "header",
+          1,
+          "Quantity Description Unit Total",
+          "left_aligned",
+          "header",
+          [
+            ["hq", "Quantity", "other"],
+            ["hd", "Description", "other"],
+            ["hu", "Unit", "other"],
+            ["ht", "Total", "other"],
+          ],
+        ),
+        stage1V3ProjectionRowFixture(
+          "linked",
+          2,
+          "1 Linked 2,00 2,00",
+          "unclear",
+          "unknown",
+          [
+            ["lq", "1", "quantity", "hq"],
+            ["ld", "Linked", "description", "hd"],
+            ["lu", "2,00", "unit_price", "hu"],
+            ["lt", "2,00", "line_total", "ht"],
+          ],
+        ),
+        stage1V3ProjectionRowFixture(
+          "headerless",
+          3,
+          "1 Headerless 3,00",
+          "left_aligned",
+          "product",
+          [
+            ["uq", "1", "quantity"],
+            ["ud", "Headerless", "description"],
+            ["uu", "3,00", "unit_price"],
+          ],
+        ),
+      ]);
+      const result = projectStage1V3ToObservedLines_(linkedInput);
+
+      assert.ok(result.resolved);
+      assert.equal(result.evidence.observedLines[1].indentation, "unclear");
+      assert.equal(result.evidence.observedLines[1].roleEvidence, "unknown");
+      assert.ok(compactJsonEquality(
+        [
+          result.evidence.observedLines[1].unitPriceText,
+          result.evidence.observedLines[2].unitPriceText,
+        ],
+        ["2,00", "3,00"],
+      ));
+      assert.equal(result.evidence.observedLines[2].lineTotalText, null);
+      assert.ok(compactJsonEquality(
+        result.sourceMap.rows[1].fieldSources.unitPriceText,
+        { cellId: "lu", headerCellRef: "hu" },
+      ));
+      assert.ok(result.sourceMap.rows[0].contextOnlyCellIds.length === 4);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection — six-product topology preserves physical price rows",
+    function (assert) {
+      const result = projectStage1V3ToObservedLines_(
+        sanitizedSixProductStage1V3ProjectionFixture(),
+      );
+      const priced = result.evidence.observedLines.filter(function (line) {
+        return line.unitPriceText !== null || line.lineTotalText !== null;
+      });
+
+      assert.ok(result.resolved);
+      assert.ok(compactJsonEquality(priced.map(function (line) {
+        return line.order;
+      }), [3, 5, 7, 9, 11, 13]));
+      assert.ok(compactJsonEquality(priced.map(function (line) {
+        return line.unitPriceText;
+      }), ["15,99", "9,79", "5,49", "9,99", "15,29", "24,99"]));
+      assert.ok(compactJsonEquality(priced.map(function (line) {
+        return line.lineTotalText;
+      }), ["15,99", "9,79", "5,49", "9,99", "15,29", "24,99"]));
+      assert.equal(
+        result.evidence.observedLines[3].leadingQuantityText,
+        "1",
+      );
+      assert.equal(
+        result.accounting.sourceCellCount,
+        result.accounting.accountedCellCount,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection — ambiguous row fields fail closed",
+    function (assert) {
+      const semanticCases = [
+        ["quantity", "leadingQuantityText"],
+        ["description", "descriptionText"],
+        ["unit_price", "unitPriceText"],
+        ["line_total", "lineTotalText"],
+      ];
+      const results = semanticCases.map(function (item, index) {
+        const input = simpleStage1V3ProjectionFixture();
+        input.physicalRows[0].cells.push(stage1V3CellFixture(
+          "duplicate-" + String(index),
+          5,
+          "duplicate",
+          null,
+          item[0],
+        ));
+        return {
+          field: item[1],
+          result: projectStage1V3ToObservedLines_(input),
+        };
+      });
+
+      assert.ok(results.every(function (item) {
+        return !item.result.resolved &&
+          item.result.evidence === null &&
+          item.result.conflicts.some(function (conflict) {
+            return conflict.code === "AMBIGUOUS_ROW_FIELD" &&
+              conflict.field === item.field;
+          });
+      }));
+      assert.ok(results.every(function (item) {
+        return item.result.accounting.sourceCellCount ===
+          item.result.accounting.accountedCellCount;
+      }));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection — bounded context handling preserves or rejects without heuristics",
+    function (assert) {
+      const productOther = simpleStage1V3ProjectionFixture();
+      productOther.physicalRows[0].cells.push(stage1V3CellFixture(
+        "product-other",
+        5,
+        "unclassified fragment",
+        null,
+        "other",
+      ));
+      const productOtherResult = projectStage1V3ToObservedLines_(productOther);
+
+      const summaryUnknown = stage1V3SummaryProjectionFixture(null);
+      summaryUnknown.physicalRows[0].cells[1].meaningEvidence = "unknown";
+      const summaryUnknownResult = projectStage1V3ToObservedLines_(
+        summaryUnknown,
+      );
+
+      const emptyContext = simpleStage1V3ProjectionFixture();
+      emptyContext.physicalRows[0].cells.push(stage1V3CellFixture(
+        "empty-context",
+        5,
+        "",
+        null,
+        "unknown",
+      ));
+      const emptyContextResult = projectStage1V3ToObservedLines_(emptyContext);
+
+      const oneSided = simpleStage1V3ProjectionFixture();
+      oneSided.physicalRows[0].cells.pop();
+      const oneSidedResult = projectStage1V3ToObservedLines_(oneSided);
+
+      assert.ok(productOtherResult.conflicts.some(function (conflict) {
+        return conflict.code === "UNREPRESENTABLE_CELL_EVIDENCE";
+      }));
+      assert.ok(summaryUnknownResult.conflicts.some(function (conflict) {
+        return conflict.code === "SUMMARY_PROJECTION_CONFLICT";
+      }));
+      assert.ok(emptyContextResult.resolved);
+      assert.ok(
+        emptyContextResult.sourceMap.rows[0].contextOnlyCellIds.indexOf(
+          "empty-context",
+        ) >= 0,
+      );
+      assert.ok(oneSidedResult.resolved);
+      assert.ok(compactJsonEquality(
+        {
+          unitPriceText:
+            oneSidedResult.evidence.observedLines[0].unitPriceText,
+          lineTotalText:
+            oneSidedResult.evidence.observedLines[0].lineTotalText,
+        },
+        { unitPriceText: "15,99", lineTotalText: null },
+      ));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection — summaries map literally or remain unresolved",
+    function (assert) {
+      const literalResult = projectStage1V3ToObservedLines_(
+        stage1V3SummaryProjectionFixture(null),
+      );
+
+      assert.ok(literalResult.resolved);
+      assert.ok(compactJsonEquality(literalResult.evidence.summaryEvidence, {
+        printedProductCount: {
+          sourceLineOrder: 2,
+          rawText: "Aantal producten: 6",
+          labelText: "Aantal producten:",
+          valueText: "6",
+        },
+        printedTotal: {
+          sourceLineOrder: 1,
+          rawText: "Totaal 81,54",
+          labelText: "Totaal",
+          valueText: "81,54",
+          totalTypeEvidence: null,
+        },
+      }));
+      assert.equal(
+        literalResult.evidence.summaryEvidence.printedTotal.totalTypeEvidence,
+        null,
+      );
+      assert.equal(
+        literalResult.accounting.sourceCellCount,
+        literalResult.accounting.accountedCellCount,
+      );
+
+      const multiRefInput = stage1V3SummaryProjectionFixture(null);
+      multiRefInput.physicalRows[0].cells.push(stage1V3CellFixture(
+        "total-label-extra",
+        3,
+        "extra",
+        null,
+        "summary_label",
+      ));
+      multiRefInput.summaryEvidence.printedTotal.labelCellRefs.push(
+        "total-label-extra",
+      );
+      const multiRefResult = projectStage1V3ToObservedLines_(multiRefInput);
+
+      assert.notOk(multiRefResult.resolved);
+      assert.ok(multiRefResult.conflicts.some(function (conflict) {
+        return conflict.code === "SUMMARY_PROJECTION_CONFLICT";
+      }));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection boundary-of-guarantee — coherent perception error remains unchanged",
+    function (assert) {
+      // Projection does not inspect the image. A physically false but
+      // internally coherent row therefore remains a perception limitation.
+      const input = simpleStage1V3ProjectionFixture();
+      const row = input.physicalRows[0];
+      row.rawText = "1 continuation-like part 9,79 9,79";
+      row.cells[1].rawText = "continuation-like part";
+      row.cells[2].rawText = "9,79";
+      row.cells[3].rawText = "9,79";
+      const snapshot = JSON.stringify(input);
+      const result = projectStage1V3ToObservedLines_(input);
+      const line = result.evidence.observedLines[0];
+
+      assert.ok(result.resolved);
+      assert.equal(line.rawText, "1 continuation-like part 9,79 9,79");
+      assert.equal(line.descriptionText, "continuation-like part");
+      assert.ok(compactJsonEquality(
+        [line.unitPriceText, line.lineTotalText],
+        ["9,79", "9,79"],
+      ));
+      assert.ok(JSON.stringify(input) === snapshot);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection integration — unchanged candidate boundary groups continuations",
+    function (assert) {
+      const projection = projectStage1V3ToObservedLines_(
+        stage1V3AnchorContinuationProjectionFixture(),
+      );
+      const candidate = buildStagedReceiptCandidate(projection.evidence);
+
+      assert.ok(projection.resolved);
+      assert.ok(candidate.structuralStatus.resolved);
+      assert.ok(compactJsonEquality(
+        candidate.evidenceTrace.candidateItemSources[0].sourceRowOrders,
+        [1, 2],
+      ));
+      assert.equal(
+        candidate.candidateReceipt.items[0].name,
+        "Synthetic anchor continuation detail",
+      );
+      assert.ok(candidate.evidenceTrace.anomalies.some(function (anomaly) {
+        return anomaly.code === "UNEXPECTED_QUANTITY_ON_CONTINUATION" &&
+          anomaly.rowOrder === 2;
+      }));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection integration — representable uncertainty fails closed downstream",
+    function (assert) {
+      const unclearInput = simpleStage1V3ProjectionFixture();
+      unclearInput.physicalRows[0].indentationEvidence = "unclear";
+      const unclearProjection = projectStage1V3ToObservedLines_(unclearInput);
+      const unclearCandidate = buildStagedReceiptCandidate(
+        unclearProjection.evidence,
+      );
+      const unknownInput = simpleStage1V3ProjectionFixture();
+      unknownInput.physicalRows[0].roleEvidence = "unknown";
+      const unknownProjection = projectStage1V3ToObservedLines_(unknownInput);
+      const unknownCandidate = buildStagedReceiptCandidate(
+        unknownProjection.evidence,
+      );
+
+      assert.ok(unclearProjection.resolved && unknownProjection.resolved);
+      assert.notOk(unclearCandidate.structuralStatus.resolved);
+      assert.ok(unclearCandidate.structuralStatus.conflicts.some(function (conflict) {
+        return conflict.code === "UNSUPPORTED_ROW_STRUCTURE";
+      }));
+      assert.notOk(unknownCandidate.structuralStatus.resolved);
+      assert.ok(unknownCandidate.structuralStatus.conflicts.some(function (conflict) {
+        return conflict.code === "UNKNOWN_OBSERVATION_ROLE";
+      }));
+      assert.ok(
+        unclearCandidate.canonicalReceipt === null &&
+          unknownCandidate.canonicalReceipt === null,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 projection integration — unresolved adapter result has no candidate input",
+    function (assert) {
+      const input = simpleStage1V3ProjectionFixture();
+      input.physicalRows[0].cells.push(stage1V3CellFixture(
+        "duplicate-unit",
+        5,
+        "99,99",
+        null,
+        "unit_price",
+      ));
+      const result = projectStage1V3ToObservedLines_(input);
+
+      assert.notOk(result.resolved);
+      assert.equal(result.evidence, null);
+      assert.ok(compactJsonEquality(Object.keys(result).sort(), [
+        "accounting",
+        "conflicts",
+        "evidence",
+        "resolved",
+        "sourceMap",
+      ]));
+      assert.notOk(
+        "canonicalReceipt" in result ||
+          "normalizedReceipt" in result ||
+          "legacyReceipt" in result,
+      );
     },
   );
 
