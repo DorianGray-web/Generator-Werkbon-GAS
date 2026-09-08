@@ -47,8 +47,8 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "staged candidate experiment —",
       "aggregate reconciliation blind spot —",
     ],
-    expectedTestCount: 30,
-    expectedAssertionCount: 212,
+    expectedTestCount: 31,
+    expectedAssertionCount: 232,
   },
   {
     batchName: "staged-financial-evidence",
@@ -200,9 +200,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 86 ||
-    new Set(names).size !== 86 ||
-    expectedAssertionTotal !== 335 ||
+    registrations.length !== 87 ||
+    new Set(names).size !== 87 ||
+    expectedAssertionTotal !== 355 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -2311,6 +2311,81 @@ function doGet(options) {
     };
   }
 
+  function shiftedStage1V2PriceAssociationFixture() {
+    // Sanitized from a repeatedly observed real Stage-1-v2 failure class.
+    function productRow(
+      order,
+      rawText,
+      descriptionText,
+      leadingQuantityText,
+      unitPriceText,
+      lineTotalText,
+      indentation,
+    ) {
+      const row = observedPrototypeRow(
+        order,
+        descriptionText,
+        leadingQuantityText,
+        unitPriceText,
+        lineTotalText,
+        indentation,
+      );
+      row.rawText = rawText;
+      return row;
+    }
+
+    return {
+      observedLines: [
+        productRow(2, "1 S2 b. deur €/stuk 15,99 15,99", "S2 b. deur", "1", "15,99", "15,99", "left_aligned"),
+        productRow(3, "1 loopslot rvs 9,79 9,79", "loopslot rvs", "1", "9,79", "9,79", "left_aligned"),
+        productRow(4, "1 Veilig dkp duim f1 5,49 5,49", "Veilig dkp duim f1", "1", "5,49", "5,49", "left_aligned"),
+        productRow(5, "deurd. 38-45mm", "deurd. 38-45mm", null, null, null, "indented"),
+        productRow(6, "1 Veilig bbw 180/41h 9,99 9,99", "Veilig bbw 180/41h", "1", "9,99", "9,99", "left_aligned"),
+        productRow(7, "1 Saniv isolatiemat 15,29 15,29", "Saniv isolatiemat", "1", "15,29", "15,29", "left_aligned"),
+        productRow(8, "voor wandcloset", "voor wandcloset", null, null, null, "indented"),
+        productRow(9, "1 Bison siliconenkit 24,99 24,99", "Bison siliconenkit", "1", "24,99", "24,99", "left_aligned"),
+        productRow(10, "sanitr super wt 0, 311", "sanitr super wt 0, 311", null, null, null, "indented"),
+        productRow(11, "1 Saniv aansluitset", "Saniv aansluitset", "1", null, null, "left_aligned"),
+        productRow(12, "tbv inbouwreservoir", "tbv inbouwreservoir", null, null, null, "indented"),
+        {
+          order: 13,
+          rawText: "Totaal 81,54",
+          leadingQuantityText: null,
+          descriptionText: "Totaal",
+          unitPriceText: null,
+          lineTotalText: "81,54",
+          indentation: "left_aligned",
+          roleEvidence: "summary",
+        },
+        {
+          order: 14,
+          rawText: "Aantal producten: 6",
+          leadingQuantityText: null,
+          descriptionText: "Aantal producten:",
+          unitPriceText: null,
+          lineTotalText: "6",
+          indentation: "left_aligned",
+          roleEvidence: "summary",
+        },
+      ],
+      summaryEvidence: {
+        printedProductCount: {
+          sourceLineOrder: 14,
+          rawText: "Aantal producten: 6",
+          labelText: "Aantal producten:",
+          valueText: "6",
+        },
+        printedTotal: {
+          sourceLineOrder: 13,
+          rawText: "Totaal 81,54",
+          labelText: "Totaal",
+          valueText: "81,54",
+          totalTypeEvidence: null,
+        },
+      },
+    };
+  }
+
   function controlledHuboOneItemStage1V2Fixture() {
     // Sanitized exact response from the controlled live Hubo-1 diagnostic.
     return {
@@ -3082,6 +3157,144 @@ function doGet(options) {
         JSON.stringify(result.evidenceTrace.originalObservations) ===
           JSON.stringify(input.observedLines),
       );
+    },
+  );
+
+  QUnit.test(
+    "staged candidate experiment — shifted Stage-1 prices with matching aggregate fail closed without repair",
+    function (assert) {
+      const input = shiftedStage1V2PriceAssociationFixture();
+      const inputSnapshot = JSON.stringify(input);
+      const pricedRows = input.observedLines.filter(function (row) {
+        return row.unitPriceText !== null || row.lineTotalText !== null;
+      }).filter(function (row) {
+        return row.roleEvidence === "product";
+      });
+      const shiftedLineTotalCents = pricedRows.reduce(function (total, row) {
+        return total + Math.round(
+          parsePrototypeAmount_(row.lineTotalText).value * 100,
+        );
+      }, 0);
+      const result = buildStagedReceiptCandidateExperiment(input);
+      const calls = [];
+      let caught = null;
+
+      try {
+        executeImageReceiptAnalysisRoute_(
+          true,
+          function () {
+            calls.push("staged");
+            return buildStagedCanonicalReceiptOrThrow_(input);
+          },
+          function () {
+            calls.push("legacy");
+            return "legacy-result";
+          },
+        );
+      } catch (error) {
+        caught = error;
+      }
+
+      assert.ok(compactJsonEquality(
+        pricedRows.map(function (row) {
+          return row.order;
+        }),
+        [2, 3, 4, 6, 7, 9],
+      ));
+      assert.ok(compactJsonEquality(
+        pricedRows.map(function (row) {
+          return row.rawText;
+        }),
+        [
+          "1 S2 b. deur €/stuk 15,99 15,99",
+          "1 loopslot rvs 9,79 9,79",
+          "1 Veilig dkp duim f1 5,49 5,49",
+          "1 Veilig bbw 180/41h 9,99 9,99",
+          "1 Saniv isolatiemat 15,29 15,29",
+          "1 Bison siliconenkit 24,99 24,99",
+        ],
+      ));
+      assert.ok(compactJsonEquality(
+        pricedRows.map(function (row) {
+          return row.unitPriceText;
+        }),
+        ["15,99", "9,79", "5,49", "9,99", "15,29", "24,99"],
+      ));
+      assert.ok(compactJsonEquality(
+        pricedRows.map(function (row) {
+          return row.lineTotalText;
+        }),
+        ["15,99", "9,79", "5,49", "9,99", "15,29", "24,99"],
+      ));
+      assert.equal(shiftedLineTotalCents, 8154);
+      assert.equal(input.summaryEvidence.printedProductCount.valueText, "6");
+      assert.ok(compactJsonEquality(input.summaryEvidence.printedTotal, {
+        sourceLineOrder: 13,
+        rawText: "Totaal 81,54",
+        labelText: "Totaal",
+        valueText: "81,54",
+        totalTypeEvidence: null,
+      }));
+      assert.ok(compactJsonEquality(
+        result.evidenceTrace.candidateItemSources.map(function (source) {
+          return source.sourceRowOrders;
+        }),
+        [[2], [3], [4, 5], [6], [7, 8], [9, 10]],
+      ));
+      assert.ok(compactJsonEquality(
+        result.evidenceTrace.candidateItemSources.map(function (source) {
+          return input.observedLines.filter(function (row) {
+            return row.order === source.anchorRowOrder;
+          })[0].lineTotalText;
+        }),
+        ["15,99", "9,79", "5,49", "9,99", "15,29", "24,99"],
+      ));
+      assert.ok(compactJsonEquality(
+        result.structuralStatus.validation.printedProductCount,
+        { rawValue: "6", parsedValue: 6, groupedCount: 6, matches: true },
+      ));
+      assert.ok(compactJsonEquality(
+        {
+          parsedAmountCents:
+            result.financialEvidence.monetaryObservations[0].parsedAmountCents,
+          candidateItemSumCents: result.financialEvidence.candidateItemSumCents,
+          comparison: result.financialEvidence.comparisons[0].relation,
+        },
+        {
+          parsedAmountCents: 8154,
+          candidateItemSumCents: 8154,
+          comparison: "equal",
+        },
+      ));
+      assert.notOk(result.structuralStatus.resolved);
+      assert.ok(result.structuralStatus.conflicts.some(function (conflict) {
+        return conflict.code === "UNPRICED_LEFT_ALIGNED_ROW" &&
+          conflict.rowOrder === 11;
+      }));
+      assert.ok(compactJsonEquality(
+        result.structuralStatus.unconsumedRowOrders,
+        [11, 12],
+      ));
+      assert.equal(result.candidateReceipt, null);
+      assert.equal(result.canonicalReceipt, null);
+      assert.ok(
+        JSON.stringify(result.evidenceTrace.originalObservations) ===
+          JSON.stringify(input.observedLines),
+      );
+      assert.ok(JSON.stringify(input) === inputSnapshot);
+      assert.ok(compactJsonEquality(
+        {
+          name: caught && caught.name,
+          stage: caught && caught.stage,
+          code: caught && caught.code,
+        },
+        {
+          name: "StagedImageExtractionError",
+          stage: "structure",
+          code: "UNPRICED_LEFT_ALIGNED_ROW",
+        },
+      ));
+      assert.ok(compactJsonEquality(calls, ["staged"]));
     },
   );
 
