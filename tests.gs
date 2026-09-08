@@ -71,9 +71,10 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "Stage-1-v2 diagnostic",
       "Stage-1-v3 contract",
       "Stage-1-v3 projection",
+      "Stage-1-v3 request diagnostic",
     ],
-    expectedTestCount: 25,
-    expectedAssertionCount: 128,
+    expectedTestCount: 35,
+    expectedAssertionCount: 208,
   },
   {
     batchName: "staged-table-evidence-diagnostics",
@@ -204,9 +205,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 107 ||
-    new Set(names).size !== 107 ||
-    expectedAssertionTotal !== 464 ||
+    registrations.length !== 117 ||
+    new Set(names).size !== 117 ||
+    expectedAssertionTotal !== 544 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -9920,6 +9921,359 @@ function doGet(options) {
   );
 
   QUnit.test(
+    "Stage-1-v3 request diagnostic — payload reuses the contract and isolates configuration",
+    function (assert) {
+      const payload = buildOpenAIStage1V3DiagnosticPayload_(
+        "image/png",
+        "bounded-test-data",
+      );
+
+      assert.equal(payload.model, "gpt-4o-2024-08-06");
+      assert.notEqual(payload.model, OPENAI.model);
+      assert.equal(payload.temperature, OPENAI.temperature);
+      assert.equal(payload.response_format.type, "json_schema");
+      assert.equal(
+        payload.response_format.json_schema.name,
+        "stage1_v3_physical_receipt_evidence",
+      );
+      assert.ok(payload.response_format.json_schema.strict);
+      assert.ok(compactJsonEquality(
+        payload.response_format.json_schema.schema,
+        buildStage1V3PhysicalEvidenceJsonSchema_(),
+      ));
+      assert.equal(
+        payload.messages[0].content[1].image_url.url,
+        "data:image/png;base64,bounded-test-data",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — prompt requires physical transcription",
+    function (assert) {
+      const prompt = buildOpenAIStage1V3DiagnosticPayload_(
+        "image/jpeg",
+        "bounded-test-data",
+      ).messages[0].content[0].text;
+
+      assert.ok(prompt.indexOf("all relevant physical rows") >= 0);
+      assert.ok(prompt.indexOf("top-to-bottom order") >= 0);
+      assert.ok(prompt.indexOf("stable unique rowId") >= 0);
+      assert.ok(prompt.indexOf("left-to-right columnOrder") >= 0);
+      assert.ok(prompt.indexOf("stable unique cellId") >= 0);
+      assert.ok(prompt.indexOf("literal row text") >= 0);
+      assert.ok(prompt.indexOf("literal cell text") >= 0);
+      assert.ok(prompt.indexOf("empty position is visually supported") >= 0);
+      assert.ok(prompt.indexOf("indentationEvidence") >= 0);
+      assert.ok(prompt.indexOf("roleEvidence") >= 0);
+      assert.ok(prompt.indexOf("meaningEvidence") >= 0);
+      assert.ok(prompt.indexOf("headerCellRef only when") >= 0);
+      assert.ok(prompt.indexOf('use "unknown" whenever') >= 0);
+      assert.ok(
+        prompt.indexOf("only actual rowIds and cellIds reported") >= 0 &&
+          prompt.indexOf("VAT basis is visually explicit") >= 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — prompt prohibits repair and interpretation",
+    function (assert) {
+      const prompt = buildOpenAIStage1V3DiagnosticPayload_(
+        "image/png",
+        "bounded-test-data",
+      ).messages[0].content[0].text;
+
+      assert.ok(prompt.indexOf("Do not move a price") >= 0);
+      assert.ok(prompt.indexOf("Do not move a quantity") >= 0);
+      assert.ok(prompt.indexOf("Do not merge physical rows") >= 0);
+      assert.ok(prompt.indexOf("reconstruct an expected product block") >= 0);
+      assert.ok(prompt.indexOf("printed product count or printed total") >= 0);
+      assert.ok(prompt.indexOf("arithmetic or quantity-times-price reasoning") >= 0);
+      assert.ok(prompt.indexOf("Do not reconcile values") >= 0);
+      assert.ok(prompt.indexOf("infer VAT meaning") >= 0);
+      assert.ok(prompt.indexOf("merchant-specific assumptions") >= 0);
+      assert.ok(prompt.indexOf("invent missing cells") >= 0);
+      assert.ok(prompt.indexOf("silently correct OCR or transcription") >= 0);
+      assert.ok(prompt.indexOf("Do not construct a canonical receipt") >= 0);
+      assert.equal(prompt.indexOf("Return a canonical receipt"), -1);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — production routing and Stage-1-v2 remain unchanged",
+    function (assert) {
+      const stagedSource = analyzeImageReceiptWithStagedExtraction_.toString();
+      const parserSource = parseStagedImageEvidenceOrThrow_.toString();
+      const productionSource = analyzeReceiptWithOpenAI.toString();
+
+      assert.equal(getReceiptAnalysisRoute_("image/png", true), "staged-image");
+      assert.ok(stagedSource.indexOf("buildOpenAIStage1V2Payload_") >= 0);
+      assert.ok(parserSource.indexOf("parseOpenAIStage1V2Response_") >= 0);
+      assert.equal(stagedSource.indexOf("Stage1V3"), -1);
+      assert.equal(productionSource.indexOf("Stage1V3"), -1);
+      assert.equal(OPENAI.model, "gpt-4o");
+      assert.equal(STAGE1_V3_DIAGNOSTIC_MODEL_, "gpt-4o-2024-08-06");
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — response metadata preserves available fields",
+    function (assert) {
+      const metadata = buildStage1V3DiagnosticResponseMetadata_(
+        "gpt-4o-2024-08-06",
+        {
+          model: "gpt-4o-2024-08-06",
+          system_fingerprint: "bounded-fingerprint",
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            total_tokens: 30,
+          },
+          choices: [{ finish_reason: "stop" }],
+        },
+      );
+
+      assert.equal(metadata.requestedModel, "gpt-4o-2024-08-06");
+      assert.ok(compactJsonEquality(metadata, {
+        requestedModel: "gpt-4o-2024-08-06",
+        returnedModel: "gpt-4o-2024-08-06",
+        systemFingerprint: "bounded-fingerprint",
+        finishReason: "stop",
+        usage: {
+          promptTokens: 10,
+          completionTokens: 20,
+          totalTokens: 30,
+        },
+      }));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — absent optional metadata remains valid",
+    function (assert) {
+      assert.ok(compactJsonEquality(
+        buildStage1V3DiagnosticResponseMetadata_(
+          "gpt-4o-2024-08-06",
+          { choices: [{ message: {} }] },
+        ),
+        {
+          requestedModel: "gpt-4o-2024-08-06",
+          returnedModel: null,
+          systemFingerprint: null,
+          finishReason: null,
+          usage: null,
+        },
+      ));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — one request uses the existing parser without retry or fallback",
+    function (assert) {
+      const evidence = minimalStage1V3PhysicalEvidenceFixture();
+      const responseText = JSON.stringify({
+        model: "gpt-4o-2024-08-06",
+        choices: [{
+          finish_reason: "stop",
+          message: { content: JSON.stringify(evidence) },
+        }],
+      });
+      let requestCount = 0;
+      let requestedUrl = null;
+      let requestedOptions = null;
+      const result = requestOpenAIStage1V3Diagnostic_(
+        "image/png",
+        "bounded-test-data",
+        null,
+        function (url, options) {
+          requestCount += 1;
+          requestedUrl = url;
+          requestedOptions = options;
+          return {
+            getResponseCode: function () { return 200; },
+            getContentText: function () { return responseText; },
+          };
+        },
+      );
+
+      assert.equal(requestCount, 1);
+      assert.equal(requestedUrl, OPENAI.apiUrl);
+      assert.equal(requestedOptions.method, "post");
+      assert.equal(
+        JSON.parse(requestedOptions.payload).response_format.json_schema.name,
+        "stage1_v3_physical_receipt_evidence",
+      );
+      assert.equal(result.requestedModel, "gpt-4o-2024-08-06");
+      assert.ok(Object.isFrozen(result.evidence));
+      assert.ok(Object.isFrozen(result.evidence.physicalRows[0]));
+
+      let failedRequestCount = 0;
+      assert.throws(function () {
+        requestOpenAIStage1V3Diagnostic_(
+          "image/png",
+          "bounded-test-data",
+          null,
+          function () {
+            failedRequestCount += 1;
+            return {
+              getResponseCode: function () { return 503; },
+              getContentText: function () { return ""; },
+            };
+          },
+        );
+      }, /STAGE1_V3_HTTP_503/);
+      assert.equal(failedRequestCount, 1);
+      assert.equal(
+        requestOpenAIStage1V3Diagnostic_.toString().indexOf("Stage1V2"),
+        -1,
+      );
+      assert.ok(
+        requestOpenAIStage1V3Diagnostic_.toString().indexOf(
+          "parseOpenAIStage1V3Response_",
+        ) >= 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — explicit selector and image MIME fail before request",
+    function (assert) {
+      let fileLookupCount = 0;
+      assert.throws(function () {
+        runStage1V3ImageRequestDiagnosticForFileId_("", {
+          getFileById: function () { fileLookupCount += 1; },
+        });
+      }, /Drive image file ID is required/);
+      assert.equal(fileLookupCount, 0);
+
+      let keyReadCount = 0;
+      let requestCount = 0;
+      assert.throws(function () {
+        runStage1V3ImageRequestDiagnosticForFileId_("explicit-test-id", {
+          getFileById: function () {
+            return {
+              getMimeType: function () { return "application/pdf"; },
+            };
+          },
+          getOpenAIApiKey: function () { keyReadCount += 1; },
+          request: function () { requestCount += 1; },
+        });
+      }, /UNSUPPORTED_STAGE1_V3_IMAGE_MIME/);
+      assert.equal(keyReadCount, 0);
+      assert.equal(requestCount, 0);
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — unresolved projection skips downstream candidate",
+    function (assert) {
+      let candidateCount = 0;
+      const result = runStage1V3ImageRequestDiagnosticForFileId_(
+        "explicit-test-id",
+        stage1V3DiagnosticDependencyFixture_(
+          minimalStage1V3PhysicalEvidenceFixture(),
+          {
+            resolved: false,
+            evidence: null,
+            conflicts: [{ code: "SYNTHETIC_PROJECTION_CONFLICT" }],
+            sourceMap: { rows: [], summaries: {} },
+            accounting: {
+              sourceRowCount: 1,
+              projectedLineCount: 1,
+              sourceCellCount: 1,
+              accountedCellCount: 1,
+            },
+          },
+          function () { candidateCount += 1; },
+        ),
+      );
+
+      assert.ok(result.transportSuccess);
+      assert.ok(result.contractValid);
+      assert.notOk(result.projectionResolved);
+      assert.notOk(result.candidateResolved);
+      assert.notOk(result.candidateInspection.invoked);
+      assert.equal(candidateCount, 0);
+      assert.ok(
+        result.requiresHumanSourceComparison &&
+          result.perceptionCorrectnessDetermined === false,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — resolved projection permits bounded read-only candidate inspection",
+    function (assert) {
+      const evidence = simpleStage1V3ProjectionFixture();
+      let requestCount = 0;
+      let candidateCount = 0;
+      const dependencies = stage1V3DiagnosticDependencyFixture_(
+        evidence,
+        null,
+        function (projectedEvidence) {
+          candidateCount += 1;
+          return {
+            structuralStatus: {
+              resolved: true,
+              conflicts: [],
+              unconsumedRowOrders: [],
+            },
+            financialStatus: {
+              resolved: false,
+              code: "MISSING_PRINTED_TOTAL_EVIDENCE",
+            },
+            candidateReceipt: { items: [{ name: "Bounded candidate" }] },
+            canonicalReceipt: null,
+            evidenceTrace: { originalObservations: projectedEvidence.observedLines },
+          };
+        },
+      );
+      const originalRequest = dependencies.request;
+      dependencies.request = function () {
+        requestCount += 1;
+        return originalRequest();
+      };
+      const result = runStage1V3ImageRequestDiagnosticForFileId_(
+        "explicit-test-id",
+        dependencies,
+      );
+      const diagnosticSource =
+        runStage1V3ImageRequestDiagnosticForFileId_.toString() +
+        buildStage1V3DiagnosticCandidateInspection_.toString();
+
+      assert.equal(requestCount, 1);
+      assert.ok(result.projectionResolved);
+      assert.equal(candidateCount, 1);
+      assert.ok(result.candidateResolved);
+      assert.ok(result.candidateInspection.invoked);
+      assert.equal(result.candidateInspection.candidateItemCount, 1);
+      assert.equal(result.candidateInspection.financialStatus.code,
+        "MISSING_PRINTED_TOTAL_EVIDENCE");
+      assert.ok(
+        result.source.fileId === "explicit-test-id" &&
+          result.source.fileName === "bounded-test.png" &&
+          result.source.sha256 === "bounded-test-sha256",
+      );
+      assert.equal("classification" in result, false);
+      assert.ok(diagnosticSource.indexOf("projectStage1V3ToObservedLines_") >= 0);
+      assert.ok(diagnosticSource.indexOf("buildStagedReceiptCandidate") >= 0);
+      assert.ok(
+        [
+          "SpreadsheetApp",
+          "replaceMaterialsForWerkbon",
+          "generateWerkbon",
+          "normalizeAndAggregateReceiptData",
+          "setName",
+          "setTrashed",
+        ].every(function (forbiddenName) {
+          return diagnosticSource.indexOf(forbiddenName) < 0;
+        }),
+      );
+    },
+  );
+
+  QUnit.test(
     "Stage-1 table-evidence diagnostic payload — requests only physical table structure",
     function (assert) {
       const payload = buildOpenAIStage1V2TableEvidenceDiagnosticPayload_(
@@ -12092,6 +12446,213 @@ function buildStage1V2OpenAIMetadata_(responseJson) {
           ),
         }
       : null,
+  };
+}
+
+const STAGE1_V3_DIAGNOSTIC_FILE_ID_PROPERTY =
+  "STAGE1_V3_DIAGNOSTIC_FILE_ID";
+
+/**
+ * Manual-only entry point for one isolated Stage-1-v3 image request.
+ * The configured Drive file is read but never modified.
+ */
+function runStage1V3ImageRequestDiagnostic() {
+  const fileId = getRequiredScriptProperty(
+    STAGE1_V3_DIAGNOSTIC_FILE_ID_PROPERTY,
+  );
+  return runStage1V3ImageRequestDiagnosticForFileId_(fileId);
+}
+
+/**
+ * Testable single-request runner. Runtime dependencies default to the existing
+ * Apps Script/OpenAI mechanisms; deterministic tests inject bounded stubs.
+ */
+function runStage1V3ImageRequestDiagnosticForFileId_(fileId, dependencies) {
+  if (typeof fileId !== "string" || fileId.trim() === "") {
+    throw new Error(
+      "A Stage-1-v3 diagnostic Drive image file ID is required in " +
+        STAGE1_V3_DIAGNOSTIC_FILE_ID_PROPERTY +
+        ".",
+    );
+  }
+
+  const runtime = dependencies || {};
+  const getFileById =
+    typeof runtime.getFileById === "function"
+      ? runtime.getFileById
+      : function (selectedFileId) {
+          return DriveApp.getFileById(selectedFileId);
+        };
+  const file = getFileById(fileId.trim());
+  const mimeType = file.getMimeType();
+  assertStage1V3DiagnosticImageMimeType_(mimeType);
+
+  const bytes = file.getBlob().getBytes();
+  const computeSha256 =
+    typeof runtime.computeSha256Hex === "function"
+      ? runtime.computeSha256Hex
+      : computeDiagnosticSha256Hex_;
+  const encodeBase64 =
+    typeof runtime.base64Encode === "function"
+      ? runtime.base64Encode
+      : function (sourceBytes) {
+          return Utilities.base64Encode(sourceBytes);
+        };
+  const source = {
+    fileId: fileId.trim(),
+    fileName: file.getName(),
+    mimeType: mimeType,
+    driveReportedByteLength: file.getSize(),
+    blobByteLength: bytes.length,
+    sha256: computeSha256(bytes),
+  };
+
+  const getOpenAIApiKey =
+    typeof runtime.getOpenAIApiKey === "function"
+      ? runtime.getOpenAIApiKey
+      : function () {
+          return getRequiredConfigValue(
+            CONFIG.openAIApiKey,
+            "OPENAI_API_KEY",
+          );
+        };
+  const makeRequest =
+    typeof runtime.request === "function"
+      ? runtime.request
+      : requestOpenAIStage1V3Diagnostic_;
+  const requestResult = makeRequest(
+    mimeType,
+    encodeBase64(bytes),
+    getOpenAIApiKey(),
+  );
+  const responseMetadata = buildStage1V3DiagnosticResponseMetadata_(
+    requestResult.requestedModel,
+    requestResult.responseJson,
+  );
+
+  const projectEvidence =
+    typeof runtime.projectEvidence === "function"
+      ? runtime.projectEvidence
+      : projectStage1V3ToObservedLines_;
+  const projection = projectEvidence(requestResult.evidence);
+  const candidateInspection = buildStage1V3DiagnosticCandidateInspection_(
+    projection,
+    typeof runtime.buildCandidate === "function"
+      ? runtime.buildCandidate
+      : buildStagedReceiptCandidate,
+  );
+  const result = {
+    transportSuccess: true,
+    contractValid: true,
+    projectionResolved: projection.resolved === true,
+    candidateResolved: candidateInspection.resolved === true,
+    requiresHumanSourceComparison: true,
+    perceptionCorrectnessDetermined: false,
+    source: source,
+    responseMetadata: responseMetadata,
+    physicalEvidence: requestResult.evidence,
+    projection: {
+      resolved: projection.resolved === true,
+      conflicts: projection.conflicts,
+      accounting: projection.accounting,
+      sourceMap: projection.sourceMap,
+    },
+    candidateInspection: candidateInspection,
+  };
+
+  const logReport =
+    typeof runtime.logReport === "function"
+      ? runtime.logReport
+      : function (report) {
+          console.log(
+            "STAGE-1-V3 IMAGE REQUEST DIAGNOSTIC — HUMAN SOURCE " +
+              "COMPARISON REQUIRED:\n" + JSON.stringify(report, null, 2),
+          );
+        };
+  logReport(result);
+  return result;
+}
+
+function buildStage1V3DiagnosticResponseMetadata_(
+  requestedModel,
+  responseJson,
+) {
+  const metadata = buildStage1V2OpenAIMetadata_(responseJson || {});
+  return {
+    requestedModel: requestedModel || null,
+    returnedModel: metadata.model,
+    systemFingerprint: metadata.systemFingerprint,
+    finishReason: metadata.finishReason,
+    usage: metadata.usage,
+  };
+}
+
+function buildStage1V3DiagnosticCandidateInspection_(
+  projection,
+  candidateBuilder,
+) {
+  if (!projection || projection.resolved !== true || !projection.evidence) {
+    return {
+      invoked: false,
+      resolved: false,
+      structuralStatus: null,
+      financialStatus: null,
+      candidateItemCount: null,
+      canonicalReceiptAvailable: false,
+    };
+  }
+
+  const candidate = candidateBuilder(projection.evidence);
+  const candidateReceipt = candidate.candidateReceipt;
+  return {
+    invoked: true,
+    resolved: Boolean(
+      candidate.structuralStatus && candidate.structuralStatus.resolved,
+    ),
+    structuralStatus: candidate.structuralStatus,
+    financialStatus: candidate.financialStatus,
+    candidateItemCount:
+      candidateReceipt && Array.isArray(candidateReceipt.items)
+        ? candidateReceipt.items.length
+        : 0,
+    canonicalReceiptAvailable: Boolean(candidate.canonicalReceipt),
+  };
+}
+
+function stage1V3DiagnosticDependencyFixture_(
+  evidence,
+  projectionResult,
+  candidateBuilder,
+) {
+  return {
+    getFileById: function () {
+      return {
+        getMimeType: function () { return "image/png"; },
+        getBlob: function () {
+          return { getBytes: function () { return [1, 2, 3]; } };
+        },
+        getName: function () { return "bounded-test.png"; },
+        getSize: function () { return 3; },
+      };
+    },
+    computeSha256Hex: function () { return "bounded-test-sha256"; },
+    base64Encode: function () { return "bounded-test-data"; },
+    getOpenAIApiKey: function () { return null; },
+    request: function () {
+      return {
+        requestedModel: "gpt-4o-2024-08-06",
+        responseJson: {
+          model: "gpt-4o-2024-08-06",
+          choices: [{ finish_reason: "stop" }],
+        },
+        evidence: evidence,
+      };
+    },
+    projectEvidence: projectionResult
+      ? function () { return projectionResult; }
+      : null,
+    buildCandidate: candidateBuilder,
+    logReport: function () {},
   };
 }
 

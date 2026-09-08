@@ -9,6 +9,7 @@
  * May be revised later based on controlled E2E evidence.
  */
 const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024; // 5 MiB
+const STAGE1_V3_DIAGNOSTIC_MODEL_ = "gpt-4o-2024-08-06";
 
 /**
  * Sends a receipt (image or PDF) to OpenAI and returns structured receipt data.
@@ -336,6 +337,133 @@ function buildOpenAIStage1V2Payload_(mimeType, base64Data) {
     },
     temperature: OPENAI.temperature,
   };
+}
+
+/**
+ * Builds the manual-only Stage-1-v3 physical-evidence request.
+ *
+ * This payload has no production caller. Its pinned model is intentionally
+ * isolated from OPENAI.model so a controlled diagnostic cannot change the
+ * production Stage-1-v2 configuration.
+ */
+function buildOpenAIStage1V3DiagnosticPayload_(mimeType, base64Data) {
+  assertStage1V3DiagnosticImageMimeType_(mimeType);
+
+  const prompt =
+    "Produce Stage-1-v3 physical receipt evidence for this image. " +
+    "Describe only visible physical evidence before any downstream receipt interpretation. " +
+    "Report all relevant physical rows in visual top-to-bottom order, using a stable unique rowId for every row within this response. " +
+    "For every row, preserve literal row text in rawText and report all meaningful visible cells or fragments in visual left-to-right columnOrder, using a stable unique cellId for every cell within this response. " +
+    "Preserve literal cell text in each cell rawText. Report an explicit empty cell position with rawText as an empty string and emptyEvidence true only when that empty position is visually supported; otherwise do not invent the cell. " +
+    'Report indentationEvidence only as "left_aligned", "indented", or "unclear" and roleEvidence only as "header", "product", "summary", or "unknown". ' +
+    'Report meaningEvidence only with a schema-supported value and use "unknown" whenever the physical role or meaning is uncertain. ' +
+    "Set headerCellRef only when the physical earlier-header-to-cell association in the same visual column is visibly supported; otherwise use null. " +
+    "Summary evidence may reference only actual rowIds and cellIds reported in this response, and all label/value references for one summary must belong to its actual source row. " +
+    'Set totalTypeEvidence to "inclVAT" or "exclVAT" only when that VAT basis is visually explicit; otherwise use null. ' +
+    "Do not move a price to another physical row. Do not move a quantity to another physical row. Do not merge physical rows. " +
+    "Do not reconstruct an expected product block, use a printed product count or printed total to repair topology, or use arithmetic or quantity-times-price reasoning to infer missing values or choose associations. " +
+    "Do not reconcile values, infer VAT meaning, apply merchant-specific assumptions, invent missing cells, or silently correct OCR or transcription. " +
+    "Do not construct a canonical receipt. Describe what is visibly present, not what the receipt is expected to mean. " +
+    "Return only the JSON object required by the response schema.";
+
+  return {
+    model: STAGE1_V3_DIAGNOSTIC_MODEL_,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:" + mimeType + ";base64," + base64Data,
+            },
+          },
+        ],
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "stage1_v3_physical_receipt_evidence",
+        strict: true,
+        schema: buildStage1V3PhysicalEvidenceJsonSchema_(),
+      },
+    },
+    temperature: OPENAI.temperature,
+  };
+}
+
+/**
+ * Executes exactly one isolated Stage-1-v3 request. A transport may be
+ * injected by deterministic tests; production routing never calls this.
+ */
+function requestOpenAIStage1V3Diagnostic_(
+  mimeType,
+  base64Data,
+  openAIApiKey,
+  fetchFunction,
+) {
+  const payload = buildOpenAIStage1V3DiagnosticPayload_(mimeType, base64Data);
+  const transport =
+    typeof fetchFunction === "function"
+      ? fetchFunction
+      : function (url, options) {
+          return UrlFetchApp.fetch(url, options);
+        };
+  const response = transport(OPENAI.apiUrl, {
+    method: "post",
+    headers: {
+      Authorization: "Bearer " + openAIApiKey,
+      "Content-Type": "application/json",
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+  const responseCode = response.getResponseCode();
+
+  if (responseCode !== 200) {
+    throw createStage1V3DiagnosticError_(
+      "transport",
+      "STAGE1_V3_HTTP_" + responseCode,
+    );
+  }
+
+  const responseText = response.getContentText();
+  let evidence;
+  try {
+    evidence = parseOpenAIStage1V3Response_(responseText);
+  } catch (error) {
+    throw createStage1V3DiagnosticError_(
+      "contract",
+      "INVALID_STAGE1_V3_RESPONSE",
+    );
+  }
+
+  return {
+    requestedModel: payload.model,
+    responseJson: JSON.parse(responseText),
+    evidence: evidence,
+  };
+}
+
+function assertStage1V3DiagnosticImageMimeType_(mimeType) {
+  if (typeof mimeType !== "string" || mimeType.indexOf("image/") !== 0) {
+    throw createStage1V3DiagnosticError_(
+      "preflight",
+      "UNSUPPORTED_STAGE1_V3_IMAGE_MIME",
+    );
+  }
+}
+
+function createStage1V3DiagnosticError_(stage, code) {
+  const error = new Error(
+    "Stage-1-v3 diagnostic failed [" + stage + ":" + code + "].",
+  );
+  error.name = "Stage1V3DiagnosticError";
+  error.stage = stage;
+  error.code = code;
+  return error;
 }
 
 function buildStage1V2JsonSchema_() {
