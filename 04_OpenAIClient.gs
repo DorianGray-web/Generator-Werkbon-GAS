@@ -437,6 +437,7 @@ function requestOpenAIStage1V3Diagnostic_(
     throw createStage1V3DiagnosticError_(
       "contract",
       "INVALID_STAGE1_V3_RESPONSE",
+      error,
     );
   }
 
@@ -456,13 +457,71 @@ function assertStage1V3DiagnosticImageMimeType_(mimeType) {
   }
 }
 
-function createStage1V3DiagnosticError_(stage, code) {
-  const error = new Error(
-    "Stage-1-v3 diagnostic failed [" + stage + ":" + code + "].",
-  );
+const STAGE1_V3_DIAGNOSTIC_CAUSE_NAME_MAX_LENGTH_ = 80;
+const STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_MAX_LENGTH_ = 512;
+const STAGE1_V3_DIAGNOSTIC_CAUSE_NAME_FALLBACK_ = "Error";
+const STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_FALLBACK_ =
+  "Stage-1-v3 parser/validator failed without a usable message.";
+
+function normalizeStage1V3DiagnosticCause_(cause) {
+  function readStringProperty(propertyName) {
+    if (
+      !cause ||
+      (typeof cause !== "object" && typeof cause !== "function")
+    ) {
+      return "";
+    }
+    try {
+      const propertyValue = cause[propertyName];
+      return typeof propertyValue === "string" ? propertyValue : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function normalizeText(value, fallback, maximumLength) {
+    const normalized = value
+      .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const usable = normalized || fallback;
+    return usable.length > maximumLength
+      ? usable.slice(0, maximumLength)
+      : usable;
+  }
+
+  return {
+    causeName: normalizeText(
+      readStringProperty("name"),
+      STAGE1_V3_DIAGNOSTIC_CAUSE_NAME_FALLBACK_,
+      STAGE1_V3_DIAGNOSTIC_CAUSE_NAME_MAX_LENGTH_,
+    ),
+    causeMessage: normalizeText(
+      readStringProperty("message"),
+      STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_FALLBACK_,
+      STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_MAX_LENGTH_,
+    ),
+  };
+}
+
+function createStage1V3DiagnosticError_(stage, code, cause) {
+  const normalizedCause =
+    arguments.length > 2
+      ? normalizeStage1V3DiagnosticCause_(cause)
+      : null;
+  let message =
+    "Stage-1-v3 diagnostic failed [" + stage + ":" + code + "].";
+  if (normalizedCause) {
+    message += " Cause: " + normalizedCause.causeMessage;
+  }
+  const error = new Error(message);
   error.name = "Stage1V3DiagnosticError";
   error.stage = stage;
   error.code = code;
+  if (normalizedCause) {
+    error.causeName = normalizedCause.causeName;
+    error.causeMessage = normalizedCause.causeMessage;
+  }
   return error;
 }
 

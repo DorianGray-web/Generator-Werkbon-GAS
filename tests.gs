@@ -16,6 +16,7 @@ const QUNIT_BATCH_NAMES = [
   "staged-financial-evidence",
   "staged-image-integration",
   "staged-stage1-diagnostics",
+  "staged-stage1-request-diagnostics",
   "staged-table-evidence-diagnostics",
   "financial-structure",
   "financial-collector",
@@ -71,10 +72,15 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "Stage-1-v2 diagnostic",
       "Stage-1-v3 contract",
       "Stage-1-v3 projection",
-      "Stage-1-v3 request diagnostic",
     ],
-    expectedTestCount: 40,
-    expectedAssertionCount: 242,
+    expectedTestCount: 25,
+    expectedAssertionCount: 128,
+  },
+  {
+    batchName: "staged-stage1-request-diagnostics",
+    testNamePrefixes: ["Stage-1-v3 request diagnostic"],
+    expectedTestCount: 18,
+    expectedAssertionCount: 150,
   },
   {
     batchName: "staged-table-evidence-diagnostics",
@@ -205,9 +211,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 122 ||
-    new Set(names).size !== 122 ||
-    expectedAssertionTotal !== 578 ||
+    registrations.length !== 125 ||
+    new Set(names).size !== 125 ||
+    expectedAssertionTotal !== 614 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -10132,6 +10138,197 @@ function doGet(options) {
         requestOpenAIStage1V3Diagnostic_.toString().indexOf(
           "parseOpenAIStage1V3Response_",
         ) >= 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — malformed envelope preserves bounded cause without request data",
+    function (assert) {
+      const rawResponseSentinel = "SYNTHETIC_RAW_RESPONSE_SENTINEL";
+      const apiKeySentinel = "SYNTHETIC_API_KEY_SENTINEL";
+      const base64Sentinel = "SYNTHETIC_BASE64_SENTINEL";
+      let requestCount = 0;
+      let caught = null;
+
+      try {
+        requestOpenAIStage1V3Diagnostic_(
+          "image/png",
+          base64Sentinel,
+          apiKeySentinel,
+          function () {
+            requestCount += 1;
+            return {
+              getResponseCode: function () { return 200; },
+              getContentText: function () {
+                return rawResponseSentinel + "{";
+              },
+            };
+          },
+        );
+      } catch (error) {
+        caught = error;
+      }
+
+      const exposedDiagnostic = caught
+        ? [
+            caught.message,
+            caught.causeName,
+            caught.causeMessage,
+            JSON.stringify(caught),
+          ].join(" ")
+        : "";
+      assert.equal(requestCount, 1);
+      assert.ok(Boolean(caught));
+      assert.equal(caught.name, "Stage1V3DiagnosticError");
+      assert.equal(caught.stage, "contract");
+      assert.equal(caught.code, "INVALID_STAGE1_V3_RESPONSE");
+      assert.equal(caught.causeName, "Error");
+      assert.equal(
+        caught.causeMessage,
+        "OpenAI Stage-1-v3 response was not valid JSON.",
+      );
+      assert.ok(
+        caught.message.indexOf("contract:INVALID_STAGE1_V3_RESPONSE") >= 0 &&
+          caught.message.indexOf(caught.causeMessage) >= 0,
+      );
+      assert.equal(exposedDiagnostic.indexOf(rawResponseSentinel), -1);
+      assert.equal(exposedDiagnostic.indexOf(apiKeySentinel), -1);
+      assert.equal(exposedDiagnostic.indexOf(base64Sentinel), -1);
+      assert.ok(
+        [
+          "responseText",
+          "rawResponse",
+          "messageContent",
+          "base64Data",
+          "openAIApiKey",
+          "authorization",
+          "fileId",
+        ].every(function (propertyName) {
+          return !(propertyName in caught);
+        }),
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — invalid Phase B evidence preserves validator cause",
+    function (assert) {
+      const modelContentSentinel = "SYNTHETIC_MODEL_CONTENT_SENTINEL";
+      const invalidEvidence = minimalStage1V3PhysicalEvidenceFixture();
+      invalidEvidence.schemaVersion = "stage1-v2";
+      invalidEvidence.physicalRows[0].rawText = modelContentSentinel;
+      invalidEvidence.physicalRows[0].cells[0].rawText = modelContentSentinel;
+      let requestCount = 0;
+      let caught = null;
+
+      try {
+        requestOpenAIStage1V3Diagnostic_(
+          "image/jpeg",
+          "bounded-test-data",
+          null,
+          function () {
+            requestCount += 1;
+            return {
+              getResponseCode: function () { return 200; },
+              getContentText: function () {
+                return stage1V3OpenAIResponseFixture(invalidEvidence);
+              },
+            };
+          },
+        );
+      } catch (error) {
+        caught = error;
+      }
+
+      const exposedDiagnostic = caught
+        ? [caught.message, caught.causeMessage, JSON.stringify(caught)].join(" ")
+        : "";
+      assert.equal(requestCount, 1);
+      assert.ok(Boolean(caught));
+      assert.equal(caught.name, "Stage1V3DiagnosticError");
+      assert.equal(caught.stage, "contract");
+      assert.equal(caught.code, "INVALID_STAGE1_V3_RESPONSE");
+      assert.equal(caught.causeName, "Error");
+      assert.equal(
+        caught.causeMessage,
+        "Stage-1-v3 evidence.schemaVersion is unsupported.",
+      );
+      assert.ok(caught.message.indexOf(caught.causeMessage) >= 0);
+      assert.equal(exposedDiagnostic.indexOf(modelContentSentinel), -1);
+      assert.notOk("evidence" in caught);
+      assert.ok(
+        caught.causeMessage.length <=
+          STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_MAX_LENGTH_,
+      );
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v3 request diagnostic — cause normalization is single-line bounded and fail-safe",
+    function (assert) {
+      const normalized = normalizeStage1V3DiagnosticCause_({
+        name: "Synthetic\u0000Error\n",
+        message: "first\r\nsecond\tthird\u0007\u2028fourth",
+      });
+      const longCause = normalizeStage1V3DiagnosticCause_({
+        name: "Error",
+        message: "x".repeat(
+          STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_MAX_LENGTH_ + 50,
+        ),
+      });
+      const fallback = normalizeStage1V3DiagnosticCause_(null);
+      const hostile = {};
+      Object.defineProperty(hostile, "name", {
+        get: function () { throw new Error("name getter failed"); },
+      });
+      Object.defineProperty(hostile, "message", {
+        get: function () { throw new Error("message getter failed"); },
+      });
+      const hostileFallback = normalizeStage1V3DiagnosticCause_(hostile);
+      const legacy = createStage1V3DiagnosticError_(
+        "transport",
+        "STAGE1_V3_HTTP_503",
+      );
+
+      assert.equal(normalized.causeName, "Synthetic Error");
+      assert.equal(normalized.causeMessage, "first second third fourth");
+      assert.notOk(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(
+        normalized.causeName + normalized.causeMessage,
+      ));
+      assert.equal(
+        longCause.causeMessage.length,
+        STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_MAX_LENGTH_,
+      );
+      assert.equal(
+        longCause.causeMessage,
+        "x".repeat(STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_MAX_LENGTH_),
+      );
+      assert.equal(
+        fallback.causeName,
+        STAGE1_V3_DIAGNOSTIC_CAUSE_NAME_FALLBACK_,
+      );
+      assert.equal(
+        fallback.causeMessage,
+        STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_FALLBACK_,
+      );
+      assert.equal(
+        hostileFallback.causeName,
+        STAGE1_V3_DIAGNOSTIC_CAUSE_NAME_FALLBACK_,
+      );
+      assert.equal(
+        hostileFallback.causeMessage,
+        STAGE1_V3_DIAGNOSTIC_CAUSE_MESSAGE_FALLBACK_,
+      );
+      assert.equal(legacy.name, "Stage1V3DiagnosticError");
+      assert.ok(
+        legacy.stage === "transport" &&
+          legacy.code === "STAGE1_V3_HTTP_503",
+      );
+      assert.notOk("causeName" in legacy || "causeMessage" in legacy);
+      assert.equal(
+        legacy.message,
+        "Stage-1-v3 diagnostic failed [transport:STAGE1_V3_HTTP_503].",
       );
     },
   );
