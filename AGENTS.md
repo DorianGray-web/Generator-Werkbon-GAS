@@ -25,6 +25,21 @@ Before making changes, agents MUST:
 
 Agents MUST preserve unrelated changes and MUST NOT perform repository-wide formatting, quote normalization, renaming, cleanup, or generated rewrites unless explicitly requested.
 
+## Evidence-driven changes
+
+Agents MUST NOT implement code, tests, abstractions, frameworks, extension points, or additional hardening solely for hypothetical future scenarios. A change MUST be justified by at least one of:
+
+- an observed real-world failure or reproducible case;
+- a demonstrated limitation in the current implementation;
+- an explicit current project requirement;
+- evidence that an existing invariant is insufficient.
+
+Use the sequence: Evidence → Problem → Boundary → Minimal solution → Regression → Validation → Stop. Prefer the smallest generalizable solution sufficient for the demonstrated problem. This does not mean the shortest code, a receipt- or merchant-specific hardcode, removal of necessary validation, or disregard of known evidence.
+
+Residual risks MAY be documented or investigated through bounded read-only research, but residual risk alone does not authorize implementation. Tests MUST protect an established requirement, invariant, regression, or demonstrated failure class; do not add tests merely for behavior that can be imagined. When the demonstrated problem is resolved and the applicable validation gate passes, stop. Further hardening requires new evidence or an explicit current project requirement.
+
+This rule limits speculative implementation, not reasoning. Current decisions may still justify bounded research, ADRs, reasonable extension boundaries, and merchant-neutral generalizable solutions.
+
 ## Safety and authorization
 
 - MUST NOT run destructive or repository-wide cleanup commands without explicit user approval.
