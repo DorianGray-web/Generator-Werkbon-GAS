@@ -17,6 +17,7 @@ const QUNIT_BATCH_NAMES = [
   "staged-image-integration",
   "staged-stage1-diagnostics",
   "staged-stage1-request-diagnostics",
+  "staged-source-topology",
   "staged-table-evidence-diagnostics",
   "financial-structure",
   "financial-collector",
@@ -81,6 +82,12 @@ const QUNIT_STAGED_BATCH_PARTITION = [
     testNamePrefixes: ["Stage-1-v3 request diagnostic"],
     expectedTestCount: 18,
     expectedAssertionCount: 150,
+  },
+  {
+    batchName: "staged-source-topology",
+    testNamePrefixes: ["Source topology —"],
+    expectedTestCount: 19,
+    expectedAssertionCount: 116,
   },
   {
     batchName: "staged-table-evidence-diagnostics",
@@ -211,9 +218,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 125 ||
-    new Set(names).size !== 125 ||
-    expectedAssertionTotal !== 614 ||
+    registrations.length !== 144 ||
+    new Set(names).size !== 144 ||
+    expectedAssertionTotal !== 730 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -2571,6 +2578,148 @@ function doGet(options) {
           caught.message.indexOf(expectedMessageFragment) >= 0,
       ),
     );
+  }
+
+  function sourceTopologyFingerprintFixture_(value) {
+    return Number(value).toString(16).repeat(64);
+  }
+
+  function sourceTopologyFragmentFixture_(
+    fragmentId,
+    fingerprintValue,
+    lexicalKind,
+    horizontalOrder,
+    horizontalRegion,
+  ) {
+    return {
+      fragmentId: fragmentId,
+      lexicalFingerprint: sourceTopologyFingerprintFixture_(fingerprintValue),
+      lexicalKind: lexicalKind,
+      horizontalOrder: horizontalOrder,
+      horizontalRegion: horizontalRegion,
+    };
+  }
+
+  function sourceTopologyRowFixture_(rowId, verticalOrder, fragments) {
+    return {
+      rowId: rowId,
+      verticalOrder: verticalOrder,
+      state: "RESOLVED",
+      fragments: fragments,
+    };
+  }
+
+  function balancedSourceTopologyEvidenceFixture_() {
+    return {
+      schemaVersion: "source-topology-evidence/1.0.0",
+      source: {
+        sha256: sourceTopologyFingerprintFixture_(10),
+        dimensions: { width: 384, height: 1080 },
+        mimeType: "image/png",
+        byteLength: 4096,
+      },
+      provenance: {
+        extractorId: "synthetic-topology-fixture",
+        extractorVersion: "1.0.0",
+        lexicalFingerprintProfile: "synthetic-sha256-v1",
+        transformation: {
+          profile: "identity",
+          parameters: {},
+          derivedSha256: null,
+          derivedDimensions: null,
+        },
+      },
+      coverage: {
+        kind: "FULL_SOURCE",
+        normalizedRegion: null,
+      },
+      status: "RESOLVED",
+      rows: [
+        sourceTopologyRowFixture_("r1", 1, [
+          sourceTopologyFragmentFixture_("f-a", 1, "non_numeric", 1, "body"),
+          sourceTopologyFragmentFixture_("f-x-1", 2, "numeric_like", 2, "trailing"),
+          sourceTopologyFragmentFixture_("f-x-2", 2, "numeric_like", 3, "trailing"),
+        ]),
+        sourceTopologyRowFixture_("r2", 2, [
+          sourceTopologyFragmentFixture_("f-a-detail", 3, "non_numeric", 1, "body"),
+        ]),
+        sourceTopologyRowFixture_("r3", 3, [
+          sourceTopologyFragmentFixture_("f-b", 4, "non_numeric", 1, "body"),
+          sourceTopologyFragmentFixture_("f-y-1", 5, "numeric_like", 2, "trailing"),
+          sourceTopologyFragmentFixture_("f-y-2", 5, "numeric_like", 3, "trailing"),
+        ]),
+      ],
+      issues: [],
+    };
+  }
+
+  function sourceTopologyV3FragmentFixture_(
+    v3CellId,
+    fingerprintValue,
+    lexicalKind,
+    horizontalOrder,
+    horizontalRegion,
+  ) {
+    return {
+      v3CellId: v3CellId,
+      lexicalFingerprint: sourceTopologyFingerprintFixture_(fingerprintValue),
+      lexicalKind: lexicalKind,
+      horizontalOrder: horizontalOrder,
+      horizontalRegion: horizontalRegion,
+    };
+  }
+
+  function sourceTopologyV3RowFixture_(v3RowId, verticalOrder, fragments) {
+    return {
+      v3RowId: v3RowId,
+      verticalOrder: verticalOrder,
+      fragments: fragments,
+    };
+  }
+
+  function sourceTopologyAgreementRowsFixture_() {
+    return [
+      sourceTopologyV3RowFixture_("v1", 1, [
+        sourceTopologyV3FragmentFixture_("c-a", 1, "non_numeric", 1, "body"),
+        sourceTopologyV3FragmentFixture_("c-x-1", 2, "numeric_like", 2, "trailing"),
+        sourceTopologyV3FragmentFixture_("c-x-2", 2, "numeric_like", 3, "trailing"),
+      ]),
+      sourceTopologyV3RowFixture_("v2", 2, [
+        sourceTopologyV3FragmentFixture_("c-a-detail", 3, "non_numeric", 1, "body"),
+      ]),
+      sourceTopologyV3RowFixture_("v3", 3, [
+        sourceTopologyV3FragmentFixture_("c-b", 4, "non_numeric", 1, "body"),
+        sourceTopologyV3FragmentFixture_("c-y-1", 5, "numeric_like", 2, "trailing"),
+        sourceTopologyV3FragmentFixture_("c-y-2", 5, "numeric_like", 3, "trailing"),
+      ]),
+    ];
+  }
+
+  function sourceTopologyComparisonInputFixture_(rows, criticalRowIds) {
+    return {
+      schemaVersion: "source-topology-comparison-input/1.0.0",
+      sourceSha256: sourceTopologyFingerprintFixture_(10),
+      lexicalFingerprintProfile: "synthetic-sha256-v1",
+      status: "RESOLVED",
+      comparisonScope: {
+        sourceCriticalRowIds: criticalRowIds || ["r1", "r2", "r3"],
+      },
+      rows: rows || sourceTopologyAgreementRowsFixture_(),
+    };
+  }
+
+  function sourceTopologyConflictCodesFixture_(result) {
+    return result.conflicts.map(function (conflict) { return conflict.code; });
+  }
+
+  function assertSourceTopologyRejectsFixture_(assert, value, comparisonInput) {
+    assert.throws(function () {
+      if (comparisonInput) {
+        validateSourceTopologyComparisonInput_(value);
+      } else {
+        validateSourceTopologyEvidence_(value);
+      }
+    }, /Source-topology/);
   }
 
   function stage1V3ProjectionEvidenceFixture(rows, summaryEvidence) {
@@ -9067,6 +9216,455 @@ function doGet(options) {
   );
 
   // ==================================================
+  // PURE SOURCE-TOPOLOGY EVIDENCE EXPERIMENTS
+  // ==================================================
+
+  QUnit.test(
+    "Source topology — balanced evidence validates as an immutable clone",
+    function (assert) {
+      const evidence = balancedSourceTopologyEvidenceFixture_();
+      const snapshot = JSON.stringify(evidence);
+      const validated = validateSourceTopologyEvidence_(evidence);
+      const withoutOptionalSourceMetadata = balancedSourceTopologyEvidenceFixture_();
+      delete withoutOptionalSourceMetadata.source.mimeType;
+      delete withoutOptionalSourceMetadata.source.byteLength;
+      const validatedWithoutOptional = validateSourceTopologyEvidence_(
+        withoutOptionalSourceMetadata,
+      );
+
+      assert.notOk(validated === evidence);
+      assert.equal(JSON.stringify(evidence), snapshot);
+      assert.equal(validated.schemaVersion, "source-topology-evidence/1.0.0");
+      assert.ok(
+        validated.source.mimeType === "image/png" &&
+          validated.source.byteLength === 4096,
+      );
+      assert.notOk(
+        "mimeType" in validatedWithoutOptional ||
+          "byteLength" in validatedWithoutOptional,
+      );
+      assert.ok(Object.isFrozen(validated));
+      assert.ok(Object.isFrozen(validated.source));
+      assert.ok(Object.isFrozen(validated.rows));
+      assert.ok(Object.isFrozen(validated.rows[0].fragments[0]));
+    },
+  );
+
+  QUnit.test(
+    "Source topology — transformed provenance and fixed geometric coverage remain explicit",
+    function (assert) {
+      const evidence = balancedSourceTopologyEvidenceFixture_();
+      evidence.provenance.transformation = {
+        profile: "synthetic-deterministic-crop-v1",
+        parameters: { left: 0.1, top: 0.2 },
+        derivedSha256: sourceTopologyFingerprintFixture_(11),
+        derivedDimensions: { width: 300, height: 700 },
+      };
+      evidence.coverage = {
+        kind: "FIXED_GEOMETRIC_REGION",
+        normalizedRegion: { left: 0.1, top: 0.2, right: 0.9, bottom: 0.8 },
+      };
+      const validated = validateSourceTopologyEvidence_(evidence);
+
+      assert.equal(validated.provenance.transformation.profile, "synthetic-deterministic-crop-v1");
+      assert.equal(validated.provenance.transformation.derivedDimensions.width, 300);
+      assert.equal(validated.coverage.kind, "FIXED_GEOMETRIC_REGION");
+      assert.equal(validated.coverage.normalizedRegion.left, 0.1);
+      assert.ok(Object.isFrozen(validated.provenance.transformation.parameters));
+      assert.ok(Object.isFrozen(validated.coverage.normalizedRegion));
+    },
+  );
+
+  QUnit.test(
+    "Source topology — Observation-B-shaped cross-row claim disagrees physically",
+    function (assert) {
+      const input = sourceTopologyComparisonInputFixture_([
+        sourceTopologyAgreementRowsFixture_()[0],
+        sourceTopologyV3RowFixture_("v2", 2, [
+          sourceTopologyV3FragmentFixture_("c-a-detail", 3, "non_numeric", 1, "body"),
+          sourceTopologyV3FragmentFixture_("c-y-1", 5, "numeric_like", 2, "trailing"),
+          sourceTopologyV3FragmentFixture_("c-y-2", 5, "numeric_like", 3, "trailing"),
+        ]),
+      ]);
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        input,
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("FRAGMENT_ROW_MISMATCH") >= 0);
+      assert.equal(result.accounting.v3CriticalRowCount, 2);
+      assert.equal(result.accounting.matchedV3CriticalRowCount, 1);
+      assert.equal(result.accounting.matchedSourceCriticalFragmentCount, 3);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — coherent-wrong counterexample disagrees without financial semantics",
+    function (assert) {
+      const rows = sourceTopologyAgreementRowsFixture_();
+      rows[1] = sourceTopologyV3RowFixture_("v2", 2, [
+        sourceTopologyV3FragmentFixture_("c-a-detail", 3, "non_numeric", 1, "body"),
+        sourceTopologyV3FragmentFixture_("c-y-1", 5, "numeric_like", 2, "trailing"),
+        sourceTopologyV3FragmentFixture_("c-y-2", 5, "numeric_like", 3, "trailing"),
+      ]);
+      rows.pop();
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        sourceTopologyComparisonInputFixture_(rows),
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("FRAGMENT_ROW_MISMATCH") >= 0);
+      assert.notOk("canonicalReceipt" in result);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — clean exact topology agrees with complete accounting",
+    function (assert) {
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        sourceTopologyComparisonInputFixture_(),
+      );
+
+      assert.equal(result.schemaVersion, "source-topology-comparison/1.0.0");
+      assert.equal(result.status, "AGREES");
+      assert.ok(result.releaseEligible);
+      assert.equal(result.conflicts.length, 0);
+      assert.equal(result.accounting.v3CriticalRowCount, 3);
+      assert.equal(result.accounting.matchedV3CriticalRowCount, 3);
+      assert.equal(result.accounting.sourceCriticalFragmentCount, 7);
+      assert.equal(result.accounting.matchedSourceCriticalFragmentCount, 7);
+      assert.ok(Object.isFrozen(result.accounting));
+    },
+  );
+
+  QUnit.test(
+    "Source topology — repeated token with multiple plausible rows remains unresolved",
+    function (assert) {
+      const evidence = balancedSourceTopologyEvidenceFixture_();
+      evidence.rows = [
+        sourceTopologyRowFixture_("r1", 1, [
+          sourceTopologyFragmentFixture_("f-z-1", 6, "unknown", 1, "unknown"),
+        ]),
+        sourceTopologyRowFixture_("r2", 2, [
+          sourceTopologyFragmentFixture_("f-z-2", 6, "unknown", 1, "unknown"),
+        ]),
+      ];
+      const input = sourceTopologyComparisonInputFixture_([
+        sourceTopologyV3RowFixture_("v1", 1, [
+          sourceTopologyV3FragmentFixture_("c-z", 6, "unknown", 1, "unknown"),
+        ]),
+      ], ["r1", "r2"]);
+      const result = compareStage1V3TopologyClaimsToSource_(evidence, input);
+
+      assert.equal(result.status, "UNRESOLVED");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("FRAGMENT_MATCH_UNRESOLVED") >= 0);
+      assert.equal(result.accounting.matchedV3CriticalRowCount, 0);
+      assert.equal(result.conflicts[0].sourceRowIds.length, 2);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — source identity mismatch stops authoritative matching",
+    function (assert) {
+      const input = sourceTopologyComparisonInputFixture_();
+      input.sourceSha256 = sourceTopologyFingerprintFixture_(12);
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        input,
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.equal(result.conflicts.length, 1);
+      assert.equal(result.conflicts[0].code, "SOURCE_IDENTITY_MISMATCH");
+      assert.equal(result.accounting.matchedV3CriticalRowCount, 0);
+      assert.equal(result.accounting.matchedSourceCriticalFragmentCount, 0);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — unresolved and failed evidence cannot agree",
+    function (assert) {
+      const unresolved = balancedSourceTopologyEvidenceFixture_();
+      unresolved.status = "UNRESOLVED";
+      unresolved.rows[1].state = "UNRESOLVED";
+      unresolved.issues = [{ code: "ROW_MEMBERSHIP_UNRESOLVED", rowId: "r2", fragmentIds: ["f-a-detail"] }];
+      const failed = balancedSourceTopologyEvidenceFixture_();
+      failed.status = "FAILED";
+      failed.issues = [{ code: "EXTRACTION_FAILED", rowId: null, fragmentIds: [] }];
+      const unresolvedResult = compareStage1V3TopologyClaimsToSource_(
+        unresolved,
+        sourceTopologyComparisonInputFixture_(),
+      );
+      const failedResult = compareStage1V3TopologyClaimsToSource_(
+        failed,
+        sourceTopologyComparisonInputFixture_(),
+      );
+
+      assert.equal(unresolvedResult.status, "UNRESOLVED");
+      assert.notOk(unresolvedResult.releaseEligible);
+      assert.equal(unresolvedResult.conflicts[0].code, "SOURCE_TOPOLOGY_INCOMPLETE");
+      assert.equal(failedResult.status, "UNRESOLVED");
+      assert.notOk(failedResult.releaseEligible);
+      assert.equal(failedResult.conflicts[0].code, "SOURCE_TOPOLOGY_INCOMPLETE");
+    },
+  );
+
+  QUnit.test(
+    "Source topology — explicitly scoped source-row omission disagrees",
+    function (assert) {
+      const rows = sourceTopologyAgreementRowsFixture_();
+      rows.splice(1, 1);
+      rows[1].verticalOrder = 2;
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        sourceTopologyComparisonInputFixture_(rows),
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("SOURCE_ROW_UNACCOUNTED") >= 0);
+      assert.equal(result.accounting.sourceCriticalFragmentCount, 7);
+      assert.equal(result.accounting.matchedSourceCriticalFragmentCount, 6);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — unsupported V3 fragment is rejected as fabrication",
+    function (assert) {
+      const rows = sourceTopologyAgreementRowsFixture_();
+      rows.push(sourceTopologyV3RowFixture_("v4", 4, [
+        sourceTopologyV3FragmentFixture_("c-unsupported", 7, "unknown", 1, "unknown"),
+      ]));
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        sourceTopologyComparisonInputFixture_(rows),
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("V3_ROW_NOT_SUPPORTED_BY_SOURCE") >= 0);
+      assert.equal(result.accounting.v3CriticalRowCount, 4);
+      assert.equal(result.conflicts[0].v3CellIds[0], "c-unsupported");
+    },
+  );
+
+  QUnit.test(
+    "Source topology — merged source rows fail closed",
+    function (assert) {
+      const input = sourceTopologyComparisonInputFixture_([
+        sourceTopologyV3RowFixture_("v1", 1, [
+          sourceTopologyV3FragmentFixture_("c-a", 1, "non_numeric", 1, "body"),
+          sourceTopologyV3FragmentFixture_("c-a-detail", 3, "non_numeric", 2, "body"),
+        ]),
+      ]);
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        input,
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("FRAGMENT_ROW_MISMATCH") >= 0);
+      assert.equal(result.accounting.matchedV3CriticalRowCount, 0);
+      assert.notOk("repair" in result);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — split source row fails one-to-one row accounting",
+    function (assert) {
+      const input = sourceTopologyComparisonInputFixture_([
+        sourceTopologyV3RowFixture_("v1", 1, [
+          sourceTopologyV3FragmentFixture_("c-a", 1, "non_numeric", 1, "body"),
+        ]),
+        sourceTopologyV3RowFixture_("v2", 2, [
+          sourceTopologyV3FragmentFixture_("c-x-1", 2, "numeric_like", 1, "trailing"),
+          sourceTopologyV3FragmentFixture_("c-x-2", 2, "numeric_like", 2, "trailing"),
+        ]),
+      ], ["r1"]);
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        input,
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("ROW_RELATION_MISMATCH") >= 0);
+      assert.equal(result.accounting.matchedV3CriticalRowCount, 2);
+      assert.equal(result.accounting.matchedSourceCriticalFragmentCount, 3);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — critical horizontal relation contradiction disagrees",
+    function (assert) {
+      const input = sourceTopologyComparisonInputFixture_([
+        sourceTopologyV3RowFixture_("v1", 1, [
+          sourceTopologyV3FragmentFixture_("c-x", 2, "numeric_like", 1, "trailing"),
+          sourceTopologyV3FragmentFixture_("c-a", 1, "non_numeric", 2, "body"),
+          sourceTopologyV3FragmentFixture_("c-x-2", 2, "numeric_like", 3, "trailing"),
+        ]),
+      ], ["r1"]);
+      const result = compareStage1V3TopologyClaimsToSource_(
+        balancedSourceTopologyEvidenceFixture_(),
+        input,
+      );
+
+      assert.equal(result.status, "DISAGREES");
+      assert.notOk(result.releaseEligible);
+      assert.ok(sourceTopologyConflictCodesFixture_(result).indexOf("ROW_RELATION_MISMATCH") >= 0);
+      assert.equal(result.accounting.sourceCriticalFragmentCount, 3);
+      assert.equal(result.accounting.matchedSourceCriticalFragmentCount, 3);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — comparator preserves both caller inputs and freezes output",
+    function (assert) {
+      const evidence = balancedSourceTopologyEvidenceFixture_();
+      const input = sourceTopologyComparisonInputFixture_();
+      const evidenceSnapshot = JSON.stringify(evidence);
+      const inputSnapshot = JSON.stringify(input);
+      const result = compareStage1V3TopologyClaimsToSource_(evidence, input);
+
+      assert.equal(JSON.stringify(evidence), evidenceSnapshot);
+      assert.equal(JSON.stringify(input), inputSnapshot);
+      assert.ok(Object.isFrozen(result));
+      assert.ok(Object.isFrozen(result.conflicts));
+      assert.ok(Object.isFrozen(result.accounting));
+      assert.ok(Object.isFrozen(validateSourceTopologyComparisonInput_(input)));
+      assert.notOk(validateSourceTopologyEvidence_(evidence) === evidence);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — schema SHA and dimensions fail closed",
+    function (assert) {
+      const wrongSchema = balancedSourceTopologyEvidenceFixture_();
+      wrongSchema.schemaVersion = "source-topology-evidence/0.0.0";
+      assertSourceTopologyRejectsFixture_(assert, wrongSchema);
+      const malformedSha = balancedSourceTopologyEvidenceFixture_();
+      malformedSha.source.sha256 = "A".repeat(64);
+      assertSourceTopologyRejectsFixture_(assert, malformedSha);
+      const zeroWidth = balancedSourceTopologyEvidenceFixture_();
+      zeroWidth.source.dimensions.width = 0;
+      assertSourceTopologyRejectsFixture_(assert, zeroWidth);
+      const fractionalHeight = balancedSourceTopologyEvidenceFixture_();
+      fractionalHeight.source.dimensions.height = 1.5;
+      assertSourceTopologyRejectsFixture_(assert, fractionalHeight);
+      const extraField = balancedSourceTopologyEvidenceFixture_();
+      extraField.source.extra = true;
+      assertSourceTopologyRejectsFixture_(assert, extraField);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — duplicate identities orders and enums fail closed",
+    function (assert) {
+      const duplicateRow = balancedSourceTopologyEvidenceFixture_();
+      duplicateRow.rows[1].rowId = "r1";
+      assertSourceTopologyRejectsFixture_(assert, duplicateRow);
+      const duplicateFragment = balancedSourceTopologyEvidenceFixture_();
+      duplicateFragment.rows[1].fragments[0].fragmentId = "f-a";
+      assertSourceTopologyRejectsFixture_(assert, duplicateFragment);
+      const verticalOrder = balancedSourceTopologyEvidenceFixture_();
+      verticalOrder.rows[1].verticalOrder = 1;
+      assertSourceTopologyRejectsFixture_(assert, verticalOrder);
+      const horizontalOrder = balancedSourceTopologyEvidenceFixture_();
+      horizontalOrder.rows[0].fragments[1].horizontalOrder = 1;
+      assertSourceTopologyRejectsFixture_(assert, horizontalOrder);
+      const lexicalKind = balancedSourceTopologyEvidenceFixture_();
+      lexicalKind.rows[0].fragments[0].lexicalKind = "amount";
+      assertSourceTopologyRejectsFixture_(assert, lexicalKind);
+      const horizontalRegion = balancedSourceTopologyEvidenceFixture_();
+      horizontalRegion.rows[0].fragments[0].horizontalRegion = "price-column";
+      assertSourceTopologyRejectsFixture_(assert, horizontalRegion);
+      const rowState = balancedSourceTopologyEvidenceFixture_();
+      rowState.rows[0].state = "GUESSED";
+      assertSourceTopologyRejectsFixture_(assert, rowState);
+      const topStatus = balancedSourceTopologyEvidenceFixture_();
+      topStatus.status = "PARTIAL";
+      assertSourceTopologyRejectsFixture_(assert, topStatus);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — coverage transformation and required fields fail closed",
+    function (assert) {
+      const coverageKind = balancedSourceTopologyEvidenceFixture_();
+      coverageKind.coverage.kind = "RECEIPT_BODY";
+      assertSourceTopologyRejectsFixture_(assert, coverageKind);
+      const coverageBounds = balancedSourceTopologyEvidenceFixture_();
+      coverageBounds.coverage = {
+        kind: "FIXED_GEOMETRIC_REGION",
+        normalizedRegion: { left: 0.9, top: 0, right: 0.1, bottom: 1 },
+      };
+      assertSourceTopologyRejectsFixture_(assert, coverageBounds);
+      const identityDerived = balancedSourceTopologyEvidenceFixture_();
+      identityDerived.provenance.transformation.derivedSha256 = sourceTopologyFingerprintFixture_(11);
+      assertSourceTopologyRejectsFixture_(assert, identityDerived);
+      const transformedIncomplete = balancedSourceTopologyEvidenceFixture_();
+      transformedIncomplete.provenance.transformation.profile = "synthetic-transform-v1";
+      assertSourceTopologyRejectsFixture_(assert, transformedIncomplete);
+      const nondeterministic = balancedSourceTopologyEvidenceFixture_();
+      nondeterministic.provenance.transformation.parameters = { value: new Date(0) };
+      assertSourceTopologyRejectsFixture_(assert, nondeterministic);
+      const missingField = balancedSourceTopologyEvidenceFixture_();
+      delete missingField.rows[0].fragments[0].horizontalRegion;
+      assertSourceTopologyRejectsFixture_(assert, missingField);
+      const nonResolvedWithoutIssue = balancedSourceTopologyEvidenceFixture_();
+      nonResolvedWithoutIssue.status = "FAILED";
+      assertSourceTopologyRejectsFixture_(assert, nonResolvedWithoutIssue);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — private comparison-input contract fails closed",
+    function (assert) {
+      const schema = sourceTopologyComparisonInputFixture_();
+      schema.schemaVersion = "stage1-v3";
+      assertSourceTopologyRejectsFixture_(assert, schema, true);
+      const duplicateScope = sourceTopologyComparisonInputFixture_();
+      duplicateScope.comparisonScope.sourceCriticalRowIds.push("r1");
+      assertSourceTopologyRejectsFixture_(assert, duplicateScope, true);
+      const duplicateRow = sourceTopologyComparisonInputFixture_();
+      duplicateRow.rows[1].v3RowId = "v1";
+      assertSourceTopologyRejectsFixture_(assert, duplicateRow, true);
+      const duplicateCell = sourceTopologyComparisonInputFixture_();
+      duplicateCell.rows[1].fragments[0].v3CellId = "c-a";
+      assertSourceTopologyRejectsFixture_(assert, duplicateCell, true);
+      const missingScope = sourceTopologyComparisonInputFixture_();
+      delete missingScope.comparisonScope;
+      assertSourceTopologyRejectsFixture_(assert, missingScope, true);
+    },
+  );
+
+  QUnit.test(
+    "Source topology — prototype remains pure non-semantic and unwired",
+    function (assert) {
+      const validatorSource = validateSourceTopologyEvidence_.toString();
+      const comparatorSource = compareStage1V3TopologyClaimsToSource_.toString();
+      const combinedSource = validatorSource + comparatorSource;
+
+      assert.equal(combinedSource.indexOf("DriveApp"), -1);
+      assert.equal(combinedSource.indexOf("UrlFetchApp"), -1);
+      assert.equal(combinedSource.indexOf("PropertiesService"), -1);
+      assert.equal(combinedSource.indexOf("OpenAI"), -1);
+      assert.equal(combinedSource.indexOf("canonicalReceipt"), -1);
+      assert.equal(combinedSource.indexOf("documentTotalInclVat"), -1);
+      assert.equal(combinedSource.indexOf("buildStagedReceiptCandidate"), -1);
+      assert.equal(combinedSource.indexOf("parseOpenAIStage1V3Response_"), -1);
+    },
+  );
+
+  // ==================================================
   // MANUAL STAGE-1-V2 IMAGE PERCEPTION DIAGNOSTIC
   // ==================================================
 
@@ -11065,6 +11663,10 @@ function runStagedImageIntegrationQUnitDiagnostics() {
 
 function runStagedStage1DiagnosticsQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-stage1-diagnostics");
+}
+
+function runStagedSourceTopologyQUnitDiagnostics() {
+  return runQUnitDiagnostics("staged-source-topology");
 }
 
 function runStagedTableEvidenceDiagnosticsQUnitDiagnostics() {
