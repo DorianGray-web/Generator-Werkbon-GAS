@@ -28,6 +28,7 @@ const QUNIT_BATCH_NAMES = [
   "financial-governed-interpretation",
   "financial-interpretation",
   "canonical-release",
+  "pdf-merge",
 ];
 const QUNIT_RETIRED_BATCH_NAMES = [
   "staged-core",
@@ -11600,6 +11601,8 @@ function doGet(options) {
     },
   );
 
+  registerPdfMergeQUnitTests_();
+
   validatePermanentStagedPartition_(stagedTestRegistrations);
   QUnit.test = registerQUnitTest;
   QUnit.start();
@@ -11609,6 +11612,160 @@ function doGet(options) {
   }
 
   return QUnitGS2.getHtml();
+}
+
+function registerPdfMergeQUnitTests_() {
+  function expectPdfMergeRejection_(assert, operation, pattern, message) {
+    return operation().then(
+      function () {
+        assert.ok(false, message + ": expected rejection");
+      },
+      function (error) {
+        const errorMessage = error && error.message
+          ? error.message
+          : String(error);
+        assert.ok(pattern.test(errorMessage), message + ": " + errorMessage);
+      },
+    );
+  }
+
+  QUnit.module("pdf-merge"); // 6 tests / 12 assertions
+
+  QUnit.test(
+    "PDF merge — preserves source and page order through a validated Blob",
+    async function (assert) {
+      assert.expect(6);
+      const sourceADocument = await PDFLib.PDFDocument.create();
+      sourceADocument.addPage([300, 400]);
+      const sourceABytes = await sourceADocument.save({
+        objectsPerTick: Infinity,
+      });
+      const sourceABlob = Utilities.newBlob(
+        pdfMergeUint8ArrayToGasBytes_(sourceABytes),
+        "application/pdf",
+        "synthetic-a.pdf",
+      );
+
+      const sourceBDocument = await PDFLib.PDFDocument.create();
+      sourceBDocument.addPage([410, 510]);
+      sourceBDocument.addPage([520, 620]);
+      const sourceBBytes = await sourceBDocument.save({
+        objectsPerTick: Infinity,
+      });
+      const sourceBBlob = Utilities.newBlob(
+        pdfMergeUint8ArrayToGasBytes_(sourceBBytes),
+        "application/pdf",
+        "synthetic-b.pdf",
+      );
+
+      const mergedBlob = await mergePdfBlobsInOrder([
+        sourceABlob,
+        sourceBBlob,
+      ]);
+      assert.ok(mergedBlob, "merged Blob exists");
+      assert.equal(
+        mergedBlob.getContentType(),
+        "application/pdf",
+        "merged Blob has PDF MIME type",
+      );
+      assert.ok(mergedBlob.getBytes().length > 0, "merged Blob is non-empty");
+
+      const reloaded = await PDFLib.PDFDocument.load(
+        pdfMergeGasBytesToUint8Array_(mergedBlob.getBytes()),
+      );
+      assert.ok(reloaded, "merged output reloads");
+      assert.equal(reloaded.getPageCount(), 3, "merged PDF has three pages");
+      assert.ok(
+        JSON.stringify(reloaded.getPages().map(function (page) {
+          const size = page.getSize();
+          return [size.width, size.height];
+        })) === JSON.stringify([
+          [300, 400],
+          [410, 510],
+          [520, 620],
+        ]),
+        "merged pages preserve caller-provided source and page order",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF merge — rejects invalid top-level inputs",
+    async function (assert) {
+      assert.expect(2);
+      await expectPdfMergeRejection_(
+        assert,
+        function () { return mergePdfBlobsInOrder(null); },
+        /requires a non-empty array/,
+        "non-array input fails closed",
+      );
+      await expectPdfMergeRejection_(
+        assert,
+        function () { return mergePdfBlobsInOrder([]); },
+        /requires a non-empty array/,
+        "empty array fails closed",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF merge — rejects an unusable source with its index",
+    async function (assert) {
+      assert.expect(1);
+      await expectPdfMergeRejection_(
+        assert,
+        function () { return mergePdfBlobsInOrder([{}]); },
+        /source at index 0 is not a usable Apps Script Blob/,
+        "unusable source fails closed",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF merge — rejects a non-PDF Blob with its index",
+    async function (assert) {
+      assert.expect(1);
+      const textBlob = Utilities.newBlob([1], "text/plain", "not-pdf.txt");
+      await expectPdfMergeRejection_(
+        assert,
+        function () { return mergePdfBlobsInOrder([textBlob]); },
+        /source at index 0 must have content type application\/pdf/,
+        "non-PDF source fails closed",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF merge — rejects an empty PDF Blob with its index",
+    async function (assert) {
+      assert.expect(1);
+      const emptyBlob = Utilities.newBlob([], "application/pdf", "empty.pdf");
+      await expectPdfMergeRejection_(
+        assert,
+        function () { return mergePdfBlobsInOrder([emptyBlob]); },
+        /source at index 0 is empty/,
+        "empty PDF source fails closed",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF merge — rejects invalid PDF bytes with their source index",
+    async function (assert) {
+      assert.expect(1);
+      const invalidBlob = Utilities.newBlob(
+        [1, 2, 3],
+        "application/pdf",
+        "invalid.pdf",
+      );
+      await expectPdfMergeRejection_(
+        assert,
+        function () { return mergePdfBlobsInOrder([invalidBlob]); },
+        /Failed to load PDF merge source at index 0/,
+        "invalid PDF bytes fail closed",
+      );
+    },
+  );
 }
 
 function createMockOpenAIResponse(content) {
@@ -11634,6 +11791,28 @@ function getResultsFromServer() {
 function runQUnitDiagnostics(batchName) {
   const report = doGet({ diagnosticsOnly: true, batch: batchName });
   console.log("QUnitGS2 batch " + batchName + ":\n" + report);
+  return report;
+}
+
+/**
+ * Runs only the async PDF merge QUnit batch and waits for QUnit completion.
+ */
+async function runPdfMergeQUnitDiagnostics() {
+  QUnitGS2.init();
+  QUnit.config.filter = "";
+  QUnit.config.module = "pdf-merge";
+  registerPdfMergeQUnitTests_();
+
+  const completion = new Promise(function (resolve) {
+    QUnit.done(function () {
+      resolve();
+    });
+  });
+  QUnit.start();
+  await completion;
+
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  console.log("QUnitGS2 batch pdf-merge:\n" + report);
   return report;
 }
 
