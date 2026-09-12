@@ -2,11 +2,33 @@
 // WERKBON PDF GENERATION
 // =========================================================================
 
-function generateWerkbon(spreadsheet) {
-  const templateDocId = getRequiredConfigValue(CONFIG.templateDocId, 'TEMPLATE_DOC_ID');
-  const pdfOutputFolderId = getRequiredConfigValue(CONFIG.pdfOutputFolderId, 'PDF_OUTPUT_FOLDER_ID');
+async function generateWerkbon(spreadsheet) {
+  return generateWerkbonWithDependencies_(spreadsheet, {
+    getConfigValue: getRequiredConfigValue,
+    getActiveSpreadsheet: function () {
+      return SpreadsheetApp.getActiveSpreadsheet();
+    },
+    showMessage: function (message) { return Browser.msgBox(message); },
+    getFolderById: function (folderId) { return DriveApp.getFolderById(folderId); },
+    getFileById: function (fileId) { return DriveApp.getFileById(fileId); },
+    openDocumentById: function (fileId) { return DocumentApp.openById(fileId); },
+    loadContext: loadWerkbonContext,
+    populateDocument: populateWerkbonDocument,
+    exportPdf: exportWerkbonPdf,
+  });
+}
 
-  const ss = spreadsheet || SpreadsheetApp.getActiveSpreadsheet();
+async function generateWerkbonWithDependencies_(spreadsheet, dependencies) {
+  const templateDocId = dependencies.getConfigValue(
+    CONFIG.templateDocId,
+    'TEMPLATE_DOC_ID'
+  );
+  const pdfOutputFolderId = dependencies.getConfigValue(
+    CONFIG.pdfOutputFolderId,
+    'PDF_OUTPUT_FOLDER_ID'
+  );
+
+  const ss = spreadsheet || dependencies.getActiveSpreadsheet();
 
   if (!ss) {
     throw new Error("No spreadsheet available. generateWerkbon() was called without a spreadsheet argument and SpreadsheetApp.getActiveSpreadsheet() returned null (common in editor context).");
@@ -15,32 +37,37 @@ function generateWerkbon(spreadsheet) {
   const generalSheet = ss.getSheetByName(SHEETS.werkbonnen);
 
   if (!generalSheet) {
-    return Browser.msgBox("The 'Werkbonnen' sheet was not found!");
+    return dependencies.showMessage("The 'Werkbonnen' sheet was not found!");
   }
 
-  const context = loadWerkbonContext(ss, generalSheet);
+  const context = dependencies.loadContext(ss, generalSheet);
 
   if (!context) {
     return;
   }
 
   console.time('Step 2: Copy the template and open the document');
-  const outputFolder = DriveApp.getFolderById(pdfOutputFolderId);
-  const tempCopy = DriveApp
+  const outputFolder = dependencies.getFolderById(pdfOutputFolderId);
+  const tempCopy = dependencies
     .getFileById(templateDocId)
     .makeCopy(`Werkbon_${context.bonId}`, outputFolder);
   const tempCopyId = tempCopy.getId();
-  const doc = DocumentApp.openById(tempCopyId);
+  const doc = dependencies.openDocumentById(tempCopyId);
   const body = doc.getBody();
   console.timeEnd('Step 2: Copy the template and open the document');
 
-  populateWerkbonDocument(body, context);
+  dependencies.populateDocument(body, context);
 
   console.time('Step 6: Save document changes (doc.saveAndClose)');
   doc.saveAndClose();
   console.timeEnd('Step 6: Save document changes (doc.saveAndClose)');
 
-  exportWerkbonPdf(ss, tempCopy, tempCopyId, outputFolder, context.bonId);
+  await dependencies.exportPdf(
+    tempCopyId,
+    outputFolder,
+    context.bonId,
+    context.rawMatRows
+  );
 }
 
 function loadWerkbonContext(ss, generalSheet) {
@@ -89,6 +116,7 @@ function buildWerkbonContext(ss, generalSheet, allData, startRowIndex, bonId) {
     locatieData,
     totaalUrenFormatted: generalSheet.getRange(startRowIndex + 1, 6).getDisplayValue(),
     urenRows: relatedRows.urenRows,
+    rawMatRows: relatedRows.rawMatRows,
     matRows: relatedRows.matRows,
     aanvullingenRows: relatedRows.aanvullingenRows,
     omschrijvingText: description.omschrijvingText,
@@ -105,11 +133,12 @@ function loadRelatedWerkbonRows(ss, bonId) {
   const rawMatRows = getSheetDataOrEmpty(matSheet, false);
   const rawAanvRows = getSheetDataOrEmpty(aanvSheet, false);
 
-  const matRows = filterDataInMemory(rawMatRows, bonId);
+  const bonMatchedMatRows = filterDataInMemory(rawMatRows, bonId);
 
   return {
     urenRows: filterDataInMemory(rawUrenRows, bonId),
-    matRows: filterCompleteMaterialRows(matRows || []),
+    rawMatRows: bonMatchedMatRows || [],
+    matRows: filterCompleteMaterialRows(bonMatchedMatRows || []),
     aanvullingenRows: filterDataInMemory(rawAanvRows, bonId),
   };
 }
@@ -210,13 +239,36 @@ function populateWerkbonTables(body, urenRows, matRows) {
   ]);
 }
 
-function exportWerkbonPdf(ss, tempCopy, tempCopyId, outputFolder, bonId) {
+async function exportWerkbonPdf(tempCopyId, outputFolder, bonId, materialRows) {
+  return exportWerkbonPdfWithDependencies_(
+    tempCopyId,
+    outputFolder,
+    bonId,
+    materialRows,
+    {
+      getOAuthToken: function () { return ScriptApp.getOAuthToken(); },
+      fetch: function (url, options) { return UrlFetchApp.fetch(url, options); },
+      buildPackage: buildWerkbonPdfPackage,
+      getFileById: function (fileId) { return DriveApp.getFileById(fileId); },
+    }
+  );
+}
+
+async function exportWerkbonPdfWithDependencies_(
+  tempCopyId,
+  outputFolder,
+  bonId,
+  materialRows,
+  dependencies
+) {
   console.time('Step 7: ULTRA-FAST PDF EXPORT USING DIRECT DOWNLOAD');
+
+  let primaryError = null;
 
   try {
     const url = `https://docs.google.com/document/d/${tempCopyId}/export?format=pdf`;
-    const token = ScriptApp.getOAuthToken();
-    const response = UrlFetchApp.fetch(url, {
+    const token = dependencies.getOAuthToken();
+    const response = dependencies.fetch(url, {
       headers: { Authorization: 'Bearer ' + token },
       muteHttpExceptions: true
     });
@@ -225,21 +277,32 @@ function exportWerkbonPdf(ss, tempCopy, tempCopyId, outputFolder, bonId) {
       throw new Error('PDF export failed: ' + response.getContentText());
     }
 
-    const pdfBlob = response.getBlob().setName(`Werkbon_${bonId}.pdf`);
-    outputFolder.createFile(pdfBlob);
+    const werkbonPdfBlob = response.getBlob();
+    const finalBlob = await dependencies.buildPackage({
+      bonId,
+      werkbonPdfBlob,
+      materialRows,
+    });
+    finalBlob.setName(`Werkbon_${bonId}.pdf`);
+    outputFolder.createFile(finalBlob);
     console.log('PDF successfully exported and saved.');
-
+  } catch (error) {
+    primaryError = error;
+    console.error('PDF export error: ' + error.message);
+  } finally {
     try {
-      DriveApp.getFileById(tempCopyId).setTrashed(true);
+      dependencies.getFileById(tempCopyId).setTrashed(true);
       console.log('Temporary document cleaned up.');
     } catch (cleanupError) {
-      console.log('Could not delete temp doc: ' + cleanupError.message);
+      console.error('Could not delete temp doc: ' + cleanupError.message);
+      if (!primaryError) {
+        primaryError = cleanupError;
+      }
     }
+    console.timeEnd('Step 7: ULTRA-FAST PDF EXPORT USING DIRECT DOWNLOAD');
+  }
 
-    console.timeEnd('Step 7: ULTRA-FAST PDF EXPORT USING DIRECT DOWNLOAD');
-  } catch (error) {
-    console.error('PDF export error: ' + error.message);
-    console.timeEnd('Step 7: ULTRA-FAST PDF EXPORT USING DIRECT DOWNLOAD');
-    throw error;
+  if (primaryError) {
+    throw primaryError;
   }
 }

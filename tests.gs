@@ -31,6 +31,7 @@ const QUNIT_BATCH_NAMES = [
   "pdf-merge",
   "image-pdf-adapter",
   "pdf-package-builder",
+  "werkbon-export-integration",
 ];
 const QUNIT_RETIRED_BATCH_NAMES = [
   "staged-core",
@@ -11691,6 +11692,7 @@ function doGet(options) {
   registerPdfMergeQUnitTests_();
   registerImagePdfAdapterQUnitTests_();
   registerPdfPackageBuilderQUnitTests_();
+  registerWerkbonExportIntegrationQUnitTests_();
 
   validatePermanentStagedPartition_(stagedTestRegistrations);
   QUnit.test = registerQUnitTest;
@@ -12705,6 +12707,404 @@ function registerPdfPackageBuilderQUnitTests_() {
   );
 }
 
+function registerWerkbonExportIntegrationQUnitTests_() {
+  async function expectWerkbonExportRejection_(
+    assert,
+    operation,
+    message
+  ) {
+    try {
+      await operation();
+      assert.ok(false, message + ": expected rejection");
+      return null;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  function createWerkbonExportFixture_(settings) {
+    const options = settings || {};
+    const sourceBlob = {
+      setNameCount: 0,
+      setName: function () {
+        this.setNameCount += 1;
+        return this;
+      },
+    };
+    const finalBlob = {
+      name: "",
+      setName: function (name) {
+        this.name = name;
+        return this;
+      },
+    };
+    const state = {
+      builderCalls: 0,
+      builderOptions: null,
+      createFileCalls: 0,
+      createdBlob: null,
+      cleanupCalls: 0,
+      cleanupFileId: null,
+    };
+    const dependencies = {
+      getOAuthToken: function () { return "synthetic-token"; },
+      fetch: function () {
+        return {
+          getResponseCode: function () {
+            return options.responseCode === undefined ? 200 : options.responseCode;
+          },
+          getContentText: function () { return "synthetic export failure"; },
+          getBlob: function () { return sourceBlob; },
+        };
+      },
+      buildPackage: function (builderOptions) {
+        state.builderCalls += 1;
+        state.builderOptions = builderOptions;
+        if (options.builderError) {
+          return Promise.reject(options.builderError);
+        }
+        return Promise.resolve(finalBlob);
+      },
+      getFileById: function (fileId) {
+        state.cleanupFileId = fileId;
+        return {
+          setTrashed: function () {
+            state.cleanupCalls += 1;
+            if (options.cleanupError) {
+              throw options.cleanupError;
+            }
+          },
+        };
+      },
+    };
+    const outputFolder = {
+      createFile: function (blob) {
+        state.createFileCalls += 1;
+        state.createdBlob = blob;
+        if (options.persistenceError) {
+          throw options.persistenceError;
+        }
+      },
+    };
+    return {
+      dependencies,
+      finalBlob,
+      outputFolder,
+      sourceBlob,
+      state,
+    };
+  }
+
+  QUnit.module("werkbon-export-integration"); // 11 tests / 43 assertions
+
+  QUnit.test(
+    "Werkbon export integration — raw material rows remain separate from presentation rows",
+    function (assert) {
+      assert.expect(4);
+      function createSheet_(rows) {
+        return {
+          getLastRow: function () { return rows.length; },
+          getLastColumn: function () { return rows[0].length; },
+          getRange: function () {
+            return { getValues: function () { return rows; } };
+          },
+        };
+      }
+      const rawReceiptRow = ["BON", "valid", 5, 1, 5, "receiptjpg", ""];
+      const incompleteReceiptRow = ["BON", "incomplete", "", 1, "", "receiptjpg", ""];
+      const materialsSheet = createSheet_([
+        ["bonId", "name", "price", "quantity", "total", "receiptKey", "documentTotal"],
+        rawReceiptRow,
+        incompleteReceiptRow,
+        ["OTHER", "other", 1, 1, 1, "otherjpg", ""],
+      ]);
+      const emptySheet = {
+        getLastRow: function () { return 1; },
+      };
+      const spreadsheet = {
+        getSheetByName: function (name) {
+          return name === SHEETS.materialen ? materialsSheet : emptySheet;
+        },
+      };
+
+      const rows = loadRelatedWerkbonRows(spreadsheet, "BON");
+      assert.equal(rows.rawMatRows.length, 2, "all bon-matched rows are retained");
+      assert.equal(rows.matRows.length, 1, "presentation filtering remains unchanged");
+      assert.ok(rows.rawMatRows[0] === rawReceiptRow, "raw rows are not projected");
+      assert.equal(rows.rawMatRows[1][5], "receiptjpg", "column F receiptKey survives");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — builder result is the only persisted and named Blob",
+    async function (assert) {
+      assert.expect(9);
+      const fixture = createWerkbonExportFixture_();
+      const materialRows = [["BON", "item", 1, 1, 1, "receiptjpg", ""]];
+
+      await exportWerkbonPdfWithDependencies_(
+        "temp-doc",
+        fixture.outputFolder,
+        "BON-1",
+        materialRows,
+        fixture.dependencies
+      );
+
+      assert.equal(fixture.state.builderCalls, 1, "builder is called once");
+      assert.equal(fixture.state.builderOptions.bonId, "BON-1", "bonId is exact");
+      assert.ok(fixture.state.builderOptions.materialRows === materialRows, "raw rows are exact");
+      assert.ok(fixture.state.builderOptions.werkbonPdfBlob === fixture.sourceBlob, "export Blob is exact");
+      assert.equal(fixture.state.createFileCalls, 1, "one final file is created");
+      assert.ok(fixture.state.createdBlob === fixture.finalBlob, "only builder result persists");
+      assert.equal(fixture.finalBlob.name, "Werkbon_BON-1.pdf", "final name is normalized");
+      assert.equal(fixture.sourceBlob.setNameCount, 0, "intermediate Blob is not named");
+      assert.ok(
+        fixture.state.cleanupCalls === 1 && fixture.state.cleanupFileId === "temp-doc",
+        "the exact temporary Doc is cleaned after success"
+      );
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — zero evidence still uses builder and one persistence",
+    async function (assert) {
+      assert.expect(4);
+      const fixture = createWerkbonExportFixture_();
+      const materialRows = [];
+      await exportWerkbonPdfWithDependencies_(
+        "temp-zero",
+        fixture.outputFolder,
+        "BON-ZERO",
+        materialRows,
+        fixture.dependencies
+      );
+      assert.equal(fixture.state.builderCalls, 1, "zero evidence does not bypass builder");
+      assert.ok(fixture.state.builderOptions.materialRows === materialRows, "empty raw array is exact");
+      assert.equal(fixture.state.createFileCalls, 1, "one ordinary Werkbon persists");
+      assert.equal(fixture.state.cleanupCalls, 1, "temporary Doc is cleaned");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — builder rejection prevents persistence and cleans",
+    async function (assert) {
+      assert.expect(3);
+      const builderError = new Error("synthetic builder rejection");
+      const fixture = createWerkbonExportFixture_({ builderError });
+      const observed = await expectWerkbonExportRejection_(assert, function () {
+        return exportWerkbonPdfWithDependencies_(
+          "temp-builder",
+          fixture.outputFolder,
+          "BON",
+          [],
+          fixture.dependencies
+        );
+      }, "builder failure propagates");
+      assert.ok(observed === builderError, "the builder error remains primary");
+      assert.equal(fixture.state.createFileCalls, 0, "no final file is created");
+      assert.equal(fixture.state.cleanupCalls, 1, "temporary Doc is cleaned");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — persistence rejection still cleans",
+    async function (assert) {
+      assert.expect(3);
+      const persistenceError = new Error("synthetic persistence rejection");
+      const fixture = createWerkbonExportFixture_({ persistenceError });
+      const observed = await expectWerkbonExportRejection_(assert, function () {
+        return exportWerkbonPdfWithDependencies_(
+          "temp-persist",
+          fixture.outputFolder,
+          "BON",
+          [],
+          fixture.dependencies
+        );
+      }, "persistence failure propagates");
+      assert.ok(observed === persistenceError, "the persistence error remains primary");
+      assert.equal(fixture.state.createFileCalls, 1, "persistence was attempted once");
+      assert.equal(fixture.state.cleanupCalls, 1, "temporary Doc is cleaned");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — cleanup failure after success fails the export",
+    async function (assert) {
+      assert.expect(3);
+      const cleanupError = new Error("synthetic cleanup rejection");
+      const fixture = createWerkbonExportFixture_({ cleanupError });
+      const observed = await expectWerkbonExportRejection_(assert, function () {
+        return exportWerkbonPdfWithDependencies_(
+          "temp-cleanup",
+          fixture.outputFolder,
+          "BON",
+          [],
+          fixture.dependencies
+        );
+      }, "cleanup failure propagates");
+      assert.ok(observed === cleanupError, "cleanup failure is observable");
+      assert.equal(fixture.state.createFileCalls, 1, "final persistence completed first");
+      assert.equal(fixture.state.cleanupCalls, 1, "cleanup was attempted once");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — cleanup failure cannot replace builder failure",
+    async function (assert) {
+      assert.expect(3);
+      const builderError = new Error("primary builder rejection");
+      const cleanupError = new Error("secondary cleanup rejection");
+      const fixture = createWerkbonExportFixture_({ builderError, cleanupError });
+      const observed = await expectWerkbonExportRejection_(assert, function () {
+        return exportWerkbonPdfWithDependencies_(
+          "temp-double-failure",
+          fixture.outputFolder,
+          "BON",
+          [],
+          fixture.dependencies
+        );
+      }, "primary failure is preserved");
+      assert.ok(observed === builderError, "the earlier builder failure remains primary");
+      assert.equal(fixture.state.createFileCalls, 0, "no final file is created");
+      assert.equal(fixture.state.cleanupCalls, 1, "cleanup still runs once");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — direct export rejection cleans and bypasses builder",
+    async function (assert) {
+      assert.expect(4);
+      const fixture = createWerkbonExportFixture_({ responseCode: 500 });
+      const observed = await expectWerkbonExportRejection_(assert, function () {
+        return exportWerkbonPdfWithDependencies_(
+          "temp-export",
+          fixture.outputFolder,
+          "BON",
+          [],
+          fixture.dependencies
+        );
+      }, "export failure propagates");
+      assert.ok(/PDF export failed/.test(observed.message), "the export error is retained");
+      assert.equal(fixture.state.builderCalls, 0, "builder is not called");
+      assert.equal(fixture.state.createFileCalls, 0, "nothing is persisted");
+      assert.equal(fixture.state.cleanupCalls, 1, "temporary Doc is cleaned");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — generateWerkbon awaits and propagates export rejection",
+    async function (assert) {
+      assert.expect(4);
+      const exportError = new Error("synthetic builder rejection through generation");
+      const rawMatRows = [["BON", "item", 1, 1, 1, "receiptjpg", ""]];
+      const state = { exportCalls: 0, saved: false };
+      const generalSheet = {};
+      const spreadsheet = {
+        getSheetByName: function () { return generalSheet; },
+      };
+      const outputFolder = {};
+      const context = { bonId: "BON", rawMatRows };
+      const dependencies = {
+        getConfigValue: function (value) { return value; },
+        getActiveSpreadsheet: function () { return null; },
+        showMessage: function () {},
+        getFolderById: function () { return outputFolder; },
+        getFileById: function () {
+          return {
+            makeCopy: function () {
+              return { getId: function () { return "temp-generate"; } };
+            },
+          };
+        },
+        openDocumentById: function () {
+          return {
+            getBody: function () { return {}; },
+            saveAndClose: function () { state.saved = true; },
+          };
+        },
+        loadContext: function () { return context; },
+        populateDocument: function () {},
+        exportPdf: function (tempId, folder, bonId, rows) {
+          state.exportCalls += 1;
+          assert.ok(
+            tempId === "temp-generate" && folder === outputFolder && bonId === "BON",
+            "generation passes exact export identity"
+          );
+          assert.ok(rows === rawMatRows, "generation passes exact raw rows");
+          return Promise.reject(exportError);
+        },
+      };
+
+      let observed = null;
+      try {
+        await generateWerkbonWithDependencies_(spreadsheet, dependencies);
+      } catch (error) {
+        observed = error;
+      }
+      assert.ok(state.saved && state.exportCalls === 1, "document is saved before one export");
+      assert.ok(observed === exportError, "the export rejection propagates unchanged");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — workflow awaits generation before success",
+    async function (assert) {
+      assert.expect(3);
+      const events = [];
+      let resolveGeneration;
+      const generation = new Promise(function (resolve) {
+        resolveGeneration = resolve;
+      });
+      const operation = runFullWorkflowWithDependencies_({
+        openSpreadsheet: function () { return {}; },
+        processNewReceipts: function () { events.push("receipts"); },
+        flush: function () { events.push("flush"); },
+        sleep: function () { events.push("sleep"); },
+        generateWerkbon: function () {
+          events.push("generate");
+          return generation;
+        },
+        toast: function (ss, message, title) { events.push("toast:" + title); },
+      });
+      assert.ok(events.indexOf("toast:Done") < 0, "success is absent while generation is pending");
+      resolveGeneration();
+      await operation;
+      assert.equal(
+        events.join("|"),
+        "receipts|flush|sleep|generate|toast:Done",
+        "success follows completed generation"
+      );
+      assert.equal(events.filter(function (event) { return event === "toast:Done"; }).length, 1, "success fires once");
+    }
+  );
+
+  QUnit.test(
+    "Werkbon export integration — rejected generation reports error and never success",
+    async function (assert) {
+      assert.expect(3);
+      const events = [];
+      await runFullWorkflowWithDependencies_({
+        openSpreadsheet: function () { return {}; },
+        processNewReceipts: function () { events.push("receipts"); },
+        flush: function () { events.push("flush"); },
+        sleep: function () { events.push("sleep"); },
+        generateWerkbon: function () {
+          return Promise.reject(new Error("synthetic generation failure"));
+        },
+        toast: function (ss, message, title) {
+          events.push({ message, title });
+        },
+      });
+      assert.equal(events.length, 4, "synchronous preparation and one toast occur");
+      assert.equal(events[3].title, "Error", "existing failure notification is used");
+      assert.ok(
+        events.every(function (event) { return !event || event.title !== "Done"; }),
+        "success is never reported"
+      );
+    }
+  );
+}
+
 function createMockOpenAIResponse(content) {
   return JSON.stringify({
     choices: [
@@ -12788,6 +13188,25 @@ async function runPdfPackageBuilderQUnitDiagnostics() {
 
   const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
   console.log("QUnitGS2 batch pdf-package-builder:\n" + report);
+  return report;
+}
+
+async function runWerkbonExportIntegrationQUnitDiagnostics() {
+  QUnitGS2.init();
+  QUnit.config.filter = "";
+  QUnit.config.module = "werkbon-export-integration";
+  registerWerkbonExportIntegrationQUnitTests_();
+
+  const completion = new Promise(function (resolve) {
+    QUnit.done(function () {
+      resolve();
+    });
+  });
+  QUnit.start();
+  await completion;
+
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  console.log("QUnitGS2 batch werkbon-export-integration:\n" + report);
   return report;
 }
 
