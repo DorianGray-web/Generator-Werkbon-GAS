@@ -8,3 +8,6 @@ processed.log
 .DS_Store
 Thumbs.db
 node_modules/
+
+# Bounded P5.3 synthetic PDF/render evidence (never source-controlled).
+.p5-3-evidence/

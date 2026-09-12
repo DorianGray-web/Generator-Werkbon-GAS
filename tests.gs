@@ -65,8 +65,8 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "staged image integration —",
       "staged production-path diagnostic —",
     ],
-    expectedTestCount: 21,
-    expectedAssertionCount: 21,
+    expectedTestCount: 24,
+    expectedAssertionCount: 24,
   },
   {
     batchName: "staged-stage1-diagnostics",
@@ -219,9 +219,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 144 ||
-    new Set(names).size !== 144 ||
-    expectedAssertionTotal !== 730 ||
+    registrations.length !== 147 ||
+    new Set(names).size !== 147 ||
+    expectedAssertionTotal !== 733 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -11601,6 +11601,91 @@ function doGet(options) {
     },
   );
 
+  QUnit.test(
+    "staged production-path diagnostic — missing summary source retains conflict context",
+    function (assert) {
+      const evidence = controlledHuboOneItemStage1V2Fixture();
+      evidence.summaryEvidence.printedTotal.sourceLineOrder = 999;
+      const candidate = buildStagedReceiptCandidate(evidence);
+      const result = buildAuditableStagedImageStructuralDiagnosticResult_(
+        {
+          fileName: "synthetic.jpg",
+          receiptKey: "syntheticjpg",
+          bonId: "SYNTHETIC-001",
+        },
+        evidence,
+        candidate,
+      );
+      const context = result.invalidSummarySourceLineContexts[0];
+
+      assert.ok(
+        result.structural.conflicts === candidate.structuralStatus.conflicts &&
+          result.receipt.fileName === "synthetic.jpg" &&
+          result.receipt.receiptKey === "syntheticjpg" &&
+          result.receipt.bonId === "SYNTHETIC-001" &&
+          result.stage1 === evidence &&
+          result.structural.resolved === false &&
+          context.code === "INVALID_SUMMARY_SOURCE_LINE" &&
+          context.field === "printedTotal" &&
+          context.rowOrder === 999 &&
+          context.referencedRowExists === false &&
+          context.referencedRowRole === null &&
+          context.referencedRowRawText === null,
+      );
+    },
+  );
+
+  QUnit.test(
+    "staged production-path diagnostic — wrong-role summary source retains row context",
+    function (assert) {
+      const evidence = controlledHuboOneItemStage1V2Fixture();
+      evidence.summaryEvidence.printedTotal.sourceLineOrder = 2;
+      const candidate = buildStagedReceiptCandidate(evidence);
+      const result = buildAuditableStagedImageStructuralDiagnosticResult_(
+        {
+          fileName: "synthetic.jpg",
+          receiptKey: "syntheticjpg",
+          bonId: "SYNTHETIC-001",
+        },
+        evidence,
+        candidate,
+      );
+      const context = result.invalidSummarySourceLineContexts[0];
+
+      assert.ok(
+        context.code === "INVALID_SUMMARY_SOURCE_LINE" &&
+          context.field === "printedTotal" &&
+          context.rowOrder === 2 &&
+          context.referencedRowExists === true &&
+          context.referencedRowRole === "product" &&
+          context.referencedRowRawText === evidence.observedLines[1].rawText &&
+          result.summaryRoleRows.length === 2,
+      );
+    },
+  );
+
+  QUnit.test(
+    "staged production-path diagnostic — structural capture stops before downstream processing",
+    function (assert) {
+      const source =
+        runAuditableStagedImageProductionPathDiagnosticForFileId.toString();
+      const forbiddenCalls = [
+        "buildStagedCanonicalReceiptOrThrow_",
+        "buildForwardPricedAnchorCanonicalRelease_",
+        "normalizeAndAggregateReceiptData",
+        "replaceMaterialsForWerkbon",
+        ".setName(",
+      ];
+
+      assert.ok(
+        source.indexOf("buildStagedReceiptCandidate") >= 0 &&
+          forbiddenCalls.every(function (callName) {
+            return source.indexOf(callName) < 0;
+          }),
+      );
+    },
+  );
+
   registerPdfMergeQUnitTests_();
 
   validatePermanentStagedPartition_(stagedTestRegistrations);
@@ -12057,9 +12142,14 @@ function runStagedImageProductionPathDiagnostic() {
  */
 function runAuditableStagedImageProductionPathDiagnostic() {
   let fileId;
+  let bonId;
   try {
     fileId = getRequiredScriptProperty(
       STAGED_IMAGE_PRODUCTION_DIAGNOSTIC_FILE_ID_PROPERTY,
+    );
+    bonId = getRequiredConfigValue(
+      CONFIG.editorTestWerkbonId,
+      "EDITOR_TEST_WERKBON_ID",
     );
   } catch (error) {
     const failure = buildAuditableStagedImageDiagnosticFailure_(
@@ -12072,15 +12162,21 @@ function runAuditableStagedImageProductionPathDiagnostic() {
     throw error;
   }
 
-  return runAuditableStagedImageProductionPathDiagnosticForFileId(fileId);
+  return runAuditableStagedImageProductionPathDiagnosticForFileId(
+    fileId,
+    bonId,
+  );
 }
 
 /**
  * Explicit/testable runner. Reads one image blob, sends those exact bytes in
- * one Stage-1 request, and reuses the parsed evidence through the production
- * candidate and canonical-release functions before a read-only normalization.
+ * one Stage-1 request, and stops after retaining the parsed evidence and the
+ * production candidate's structural diagnosis.
  */
-function runAuditableStagedImageProductionPathDiagnosticForFileId(fileId) {
+function runAuditableStagedImageProductionPathDiagnosticForFileId(
+  fileId,
+  bonId,
+) {
   const runId = "staged-image-" + new Date().toISOString();
   let activeStage = "preflight";
   const captured = { runId: runId };
@@ -12090,6 +12186,12 @@ function runAuditableStagedImageProductionPathDiagnosticForFileId(fileId) {
       fileId,
       isStagedImageExtractionEnabled(),
     );
+    const validatedBonId = cleanId(bonId);
+    if (!validatedBonId) {
+      throw new Error(
+        "The auditable staged production-path diagnostic bonId is required.",
+      );
+    }
 
     activeStage = "source";
     const file = DriveApp.getFileById(validatedFileId);
@@ -12100,13 +12202,11 @@ function runAuditableStagedImageProductionPathDiagnosticForFileId(fileId) {
       );
     }
     const bytes = file.getBlob().getBytes();
-    captured.source = {
-      fileId: validatedFileId,
-      fileName: file.getName(),
-      mimeType: mimeType,
-      driveReportedByteLength: file.getSize(),
-      blobByteLength: bytes.length,
-      sha256: computeDiagnosticSha256Hex_(bytes),
+    const fileName = file.getName();
+    captured.receipt = {
+      fileName: fileName,
+      receiptKey: generateReceiptKey(fileName),
+      bonId: validatedBonId,
     };
 
     activeStage = "perception/schema";
@@ -12135,50 +12235,30 @@ function runAuditableStagedImageProductionPathDiagnosticForFileId(fileId) {
       );
     }
 
+    const responseText = response.getContentText();
     let parsedEnvelope;
     try {
-      parsedEnvelope = parseOpenAIStage1V2Envelope_(response.getContentText());
+      parsedEnvelope = parseOpenAIStage1V2Envelope_(responseText);
     } catch (error) {
+      captured.rawResponse = responseText;
       throw createStagedImageExtractionError_(
         "perception",
         "INVALID_STAGE1_RESPONSE",
       );
     }
-    captured.model = buildStage1V2OpenAIMetadata_(
-      parsedEnvelope.responseJson,
-    );
     captured.stage1 = parsedEnvelope.evidence;
 
-    activeStage = "structure/financial";
+    activeStage = "structure";
     const candidate = buildStagedReceiptCandidate(captured.stage1);
-
-    activeStage = "canonical/release";
-    const canonical = buildStagedCanonicalReceiptOrThrow_(captured.stage1);
-    const release = buildForwardPricedAnchorCanonicalRelease_(candidate);
-    if (
-      !release.releaseStatus.eligible ||
-      JSON.stringify(canonical) !== JSON.stringify(release.canonicalReceipt)
-    ) {
-      throw createStagedImageExtractionError_(
-        "canonical",
-        firstStagedIssueCode_(
-          release.conflicts,
-          "DIAGNOSTIC_RELEASE_MISMATCH",
-        ),
-      );
-    }
-
-    activeStage = "normalization";
-    const normalized = normalizeAndAggregateReceiptData(canonical);
-    const result = buildAuditableStagedImageDiagnosticResult_(
-      captured.source,
-      captured.model,
+    const result = buildAuditableStagedImageStructuralDiagnosticResult_(
+      captured.receipt,
       captured.stage1,
       candidate,
-      release,
-      canonical,
-      normalized,
     );
+    captured.structural = result.structural;
+    captured.invalidSummarySourceLineContexts =
+      result.invalidSummarySourceLineContexts;
+    captured.summaryRoleRows = result.summaryRoleRows;
     result.runId = runId;
     logAuditableStagedImageDiagnostic_(result);
     return result;
@@ -12189,15 +12269,77 @@ function runAuditableStagedImageProductionPathDiagnosticForFileId(fileId) {
     );
     failure.runId = runId;
     failure.availableEvidence = {
-      source: captured.source || null,
-      model: captured.model || null,
+      receipt: captured.receipt || null,
       stage1: captured.stage1 || null,
+      structural: captured.structural || null,
+      invalidSummarySourceLineContexts:
+        captured.invalidSummarySourceLineContexts || [],
+      summaryRoleRows: captured.summaryRoleRows || [],
+      rawResponse: captured.stage1 ? null : captured.rawResponse || null,
     };
     console.error(
       "[" + runId + "][ERROR]\n" + JSON.stringify(failure, null, 2),
     );
     throw error;
   }
+}
+
+function buildAuditableStagedImageStructuralDiagnosticResult_(
+  receipt,
+  evidence,
+  candidate,
+) {
+  const observations = evidence.observedLines;
+  const conflicts = candidate.structuralStatus.conflicts;
+
+  return {
+    outcome: "structural_diagnosis",
+    receipt: receipt,
+    stage1: evidence,
+    structural: {
+      resolved: candidate.structuralStatus.resolved,
+      conflicts: conflicts,
+    },
+    invalidSummarySourceLineContexts:
+      buildInvalidSummarySourceLineDiagnosticContexts_(observations, conflicts),
+    summaryRoleRows: observations
+      .filter(function (row) {
+        return row.roleEvidence === "summary";
+      })
+      .map(function (row) {
+        return {
+          order: row.order,
+          roleEvidence: row.roleEvidence,
+          rawText: row.rawText,
+        };
+      }),
+  };
+}
+
+function buildInvalidSummarySourceLineDiagnosticContexts_(
+  observations,
+  conflicts,
+) {
+  return conflicts
+    .filter(function (conflict) {
+      return conflict.code === "INVALID_SUMMARY_SOURCE_LINE";
+    })
+    .map(function (conflict) {
+      const referencedRow = observations.filter(function (row) {
+        return row.order === conflict.rowOrder;
+      })[0];
+
+      return {
+        code: conflict.code,
+        field: conflict.field,
+        rowOrder: conflict.rowOrder,
+        referencedRowExists: Boolean(referencedRow),
+        referencedRowRole: referencedRow
+          ? referencedRow.roleEvidence
+          : null,
+        referencedRowRawText: referencedRow ? referencedRow.rawText : null,
+      };
+    });
 }
 
 function buildAuditableStagedImageDiagnosticResult_(
@@ -12368,17 +12510,14 @@ function buildAuditableStagedImageDiagnosticFailure_(error, activeStage) {
 function logAuditableStagedImageDiagnostic_(result) {
   const prefix = "[" + result.runId + "]";
   const sections = [
-    ["SOURCE", result.source],
-    ["MODEL", result.model],
+    ["RECEIPT", result.receipt],
     ["STAGE1", result.stage1],
-    ["PARTITION", result.partition],
-    ["GROUPS", result.groups],
-    ["CANDIDATE_RELEASE", result.candidateRelease],
-    ["CANONICAL", {
-      receipt: result.canonical,
-      provenance: result.canonicalProvenance,
-    }],
-    ["NORMALIZED", result.normalized],
+    ["STRUCTURAL", result.structural],
+    [
+      "INVALID_SUMMARY_SOURCE_LINES",
+      result.invalidSummarySourceLineContexts,
+    ],
+    ["SUMMARY_ROLE_ROWS", result.summaryRoleRows],
   ];
   sections.forEach(function (section, index) {
     console.log(
