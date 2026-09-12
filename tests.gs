@@ -29,6 +29,7 @@ const QUNIT_BATCH_NAMES = [
   "financial-interpretation",
   "canonical-release",
   "pdf-merge",
+  "image-pdf-adapter",
 ];
 const QUNIT_RETIRED_BATCH_NAMES = [
   "staged-core",
@@ -11687,6 +11688,7 @@ function doGet(options) {
   );
 
   registerPdfMergeQUnitTests_();
+  registerImagePdfAdapterQUnitTests_();
 
   validatePermanentStagedPartition_(stagedTestRegistrations);
   QUnit.test = registerQUnitTest;
@@ -11853,6 +11855,385 @@ function registerPdfMergeQUnitTests_() {
   );
 }
 
+function registerImagePdfAdapterQUnitTests_() {
+  function expectImagePdfRejection_(assert, operation, pattern, message) {
+    return Promise.resolve()
+      .then(operation)
+      .then(
+        function () {
+          assert.ok(false, message + ": expected rejection");
+        },
+        function (error) {
+          const errorMessage = error && error.message
+            ? error.message
+            : String(error);
+          assert.ok(pattern.test(errorMessage), message + ": " + errorMessage);
+        },
+      );
+  }
+
+  function createImagePdfTestBlob_(mime, bytes) {
+    return {
+      getContentType: function () { return mime; },
+      getBytes: function () { return bytes.slice(); },
+    };
+  }
+
+  function createImagePdfTestPngBytes_(width, height) {
+    return [
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d,
+      0x49, 0x48, 0x44, 0x52,
+      (width >>> 24) & 0xff,
+      (width >>> 16) & 0xff,
+      (width >>> 8) & 0xff,
+      width & 0xff,
+      (height >>> 24) & 0xff,
+      (height >>> 16) & 0xff,
+      (height >>> 8) & 0xff,
+      height & 0xff,
+    ];
+  }
+
+  function createImagePdfTestJpegBytes_(includeExif) {
+    const bytes = [0xff, 0xd8];
+    if (includeExif) {
+      bytes.push(
+        0xff, 0xe1, 0x00, 0x08,
+        0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+      );
+    }
+    bytes.push(
+      0xff, 0xc0, 0x00, 0x11, 0x08,
+      0x04, 0xb0,
+      0x07, 0xd0,
+      0x03,
+      0x01, 0x11, 0x00,
+      0x02, 0x11, 0x00,
+      0x03, 0x11, 0x00,
+      0xff, 0xd9,
+    );
+    return bytes;
+  }
+
+  function createImagePdfTestDependencies_(options) {
+    const settings = options || {};
+    const state = {
+      createCount: 0,
+      trashCount: 0,
+      trashed: false,
+      requestedWidth: null,
+      requestedHeight: null,
+    };
+    const pdfBlob = createImagePdfTestBlob_(
+      settings.pdfMime || "application/pdf",
+      settings.pdfBytes === undefined ? [1, 2, 3] : settings.pdfBytes,
+    );
+    const insertedImage = {
+      setWidth: function (width) {
+        state.requestedWidth = width;
+        return insertedImage;
+      },
+      setHeight: function (height) {
+        state.requestedHeight = height;
+        return insertedImage;
+      },
+      getWidth: function () {
+        return state.requestedWidth + (settings.observedWidthDelta || 0);
+      },
+      getHeight: function () {
+        return state.requestedHeight + (settings.observedHeightDelta || 0);
+      },
+    };
+    const body = {
+      setPageWidth: function () { return body; },
+      setPageHeight: function () { return body; },
+      setMarginTop: function () { return body; },
+      setMarginBottom: function () { return body; },
+      setMarginLeft: function () { return body; },
+      setMarginRight: function () { return body; },
+      appendImage: function () { return insertedImage; },
+    };
+    const document = {
+      getId: function () { return "synthetic-temp-doc"; },
+      getBody: function () { return body; },
+      saveAndClose: function () {},
+    };
+    const file = {
+      getAs: function () { return pdfBlob; },
+      setTrashed: function () {
+        state.trashCount += 1;
+        state.trashed = settings.cleanupVerified === false ? false : true;
+      },
+      isTrashed: function () { return state.trashed; },
+    };
+    const dependencies = {
+      createDocument: function () {
+        state.createCount += 1;
+        return document;
+      },
+      getFileById: function (fileId) {
+        if (fileId !== "synthetic-temp-doc") {
+          throw new Error("Unexpected temporary Doc ID.");
+        }
+        return file;
+      },
+      createUuid: function () { return "synthetic-uuid"; },
+      loadPdfDocument: function () {
+        if (settings.pdfLoadError) {
+          return Promise.reject(new Error("synthetic invalid PDF"));
+        }
+        const pageCount = settings.pageCount === undefined
+          ? 1
+          : settings.pageCount;
+        return Promise.resolve({
+          getPageCount: function () { return pageCount; },
+          getPages: function () {
+            return [{
+              getSize: function () {
+                return settings.pageGeometry || { width: 595.28, height: 841.89 };
+              },
+            }];
+          },
+        });
+      },
+    };
+    return { dependencies: dependencies, state: state, pdfBlob: pdfBlob };
+  }
+
+  QUnit.module("image-pdf-adapter"); // 13 tests / 37 assertions
+
+  QUnit.test(
+    "Image PDF adapter — reads PNG IHDR geometry",
+    function (assert) {
+      assert.expect(3);
+      const geometry = parseImagePdfPngGeometry_(
+        createImagePdfTestPngBytes_(1200, 2000),
+      );
+      assert.equal(geometry.widthPixels, 1200, "PNG width is read from IHDR");
+      assert.equal(geometry.heightPixels, 2000, "PNG height is read from IHDR");
+      assert.equal(geometry.orientation, "portrait", "PNG orientation is derived");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects malformed PNG input",
+    function (assert) {
+      assert.expect(1);
+      assert.throws(
+        function () { parseImagePdfPngGeometry_([0x89, 0x50]); },
+        /IMAGE_GEOMETRY_UNRESOLVED/,
+        "malformed PNG fails closed",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — reads ordinary JPEG SOF geometry",
+    function (assert) {
+      assert.expect(3);
+      const geometry = parseImagePdfJpegGeometry_(
+        createImagePdfTestJpegBytes_(false),
+      );
+      assert.equal(geometry.widthPixels, 2000, "JPEG width is read from SOF");
+      assert.equal(geometry.heightPixels, 1200, "JPEG height is read from SOF");
+      assert.equal(geometry.orientation, "landscape", "JPEG orientation is derived");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects unresolved EXIF JPEG geometry",
+    function (assert) {
+      assert.expect(1);
+      assert.throws(
+        function () { parseImagePdfJpegGeometry_(createImagePdfTestJpegBytes_(true)); },
+        /IMAGE_GEOMETRY_UNRESOLVED/,
+        "EXIF-bearing JPEG fails closed without orientation parsing",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects unsupported MIME before Doc creation",
+    async function (assert) {
+      assert.expect(2);
+      const fixture = createImagePdfTestDependencies_();
+      await expectImagePdfRejection_(
+        assert,
+        function () {
+          return convertImageBlobToPdfWithDependencies_(
+            createImagePdfTestBlob_("image/gif", [1]),
+            fixture.dependencies,
+          );
+        },
+        /UNSUPPORTED_EVIDENCE_TYPE/,
+        "unsupported MIME fails closed",
+      );
+      assert.equal(fixture.state.createCount, 0, "no temporary Doc is created");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects empty bytes before Doc creation",
+    async function (assert) {
+      assert.expect(2);
+      const fixture = createImagePdfTestDependencies_();
+      await expectImagePdfRejection_(
+        assert,
+        function () {
+          return convertImageBlobToPdfWithDependencies_(
+            createImagePdfTestBlob_("image/png", []),
+            fixture.dependencies,
+          );
+        },
+        /IMAGE_CONVERSION_FAILED/,
+        "empty image fails closed",
+      );
+      assert.equal(fixture.state.createCount, 0, "no temporary Doc is created");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — contain sizing is deterministic across orientations",
+    function (assert) {
+      assert.expect(9);
+      const landscape = calculateImagePdfContainSizing_(2000, 1200, 384, 640);
+      const portrait = calculateImagePdfContainSizing_(1200, 2000, 384, 640);
+      const narrow = calculateImagePdfContainSizing_(300, 3000, 384, 640);
+
+      assert.equal(landscape.widthPixels, 384, "landscape width limits sizing");
+      assert.equal(landscape.heightPixels, 230, "landscape height uses the common scale");
+      assert.equal(landscape.orientation, "landscape", "landscape stays landscape");
+      assert.equal(portrait.widthPixels, 384, "portrait width is contained");
+      assert.equal(portrait.heightPixels, 640, "portrait height is contained");
+      assert.equal(portrait.orientation, "portrait", "portrait stays portrait");
+      assert.equal(narrow.widthPixels, 64, "narrow width uses the common scale");
+      assert.equal(narrow.heightPixels, 640, "narrow height limits sizing");
+      assert.equal(narrow.orientation, "portrait", "narrow input stays portrait");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — setter differences are recorded without rejection",
+    function (assert) {
+      assert.expect(4);
+      const requested = imagePdfGeometryRecord_(384, 640);
+      const projection = projectImagePdfObservedGeometry_(requested, 384, 639);
+      assert.ok(projection.requestedGeometry === requested, "requested geometry is retained");
+      assert.equal(projection.observedGeometry.widthPixels, 384, "observed width is retained");
+      assert.equal(projection.observedGeometry.heightPixels, 639, "observed height is retained");
+      assert.ok(projection.dimensionsChanged, "setter-induced change is recorded");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — accepts one structurally valid PDF page",
+    async function (assert) {
+      assert.expect(3);
+      const fixture = createImagePdfTestDependencies_();
+      const result = await validateSinglePageImagePdf_(
+        fixture.pdfBlob,
+        fixture.dependencies.loadPdfDocument,
+      );
+      assert.equal(result.pageCount, 1, "one page is accepted");
+      assert.equal(result.pageGeometry.widthPoints, 595.28, "page width is retained");
+      assert.equal(result.pageGeometry.heightPoints, 841.89, "page height is retained");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects multi-page PDF output",
+    async function (assert) {
+      assert.expect(1);
+      const fixture = createImagePdfTestDependencies_({ pageCount: 2 });
+      await expectImagePdfRejection_(
+        assert,
+        function () {
+          return validateSinglePageImagePdf_(
+            fixture.pdfBlob,
+            fixture.dependencies.loadPdfDocument,
+          );
+        },
+        /PDF_INVALID/,
+        "multi-page output fails closed",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects empty and structurally invalid PDF output",
+    async function (assert) {
+      assert.expect(2);
+      const empty = createImagePdfTestDependencies_({ pdfBytes: [] });
+      const invalid = createImagePdfTestDependencies_({ pdfLoadError: true });
+      await expectImagePdfRejection_(
+        assert,
+        function () {
+          return validateSinglePageImagePdf_(
+            empty.pdfBlob,
+            empty.dependencies.loadPdfDocument,
+          );
+        },
+        /PDF_INVALID/,
+        "empty output fails closed",
+      );
+      await expectImagePdfRejection_(
+        assert,
+        function () {
+          return validateSinglePageImagePdf_(
+            invalid.pdfBlob,
+            invalid.dependencies.loadPdfDocument,
+          );
+        },
+        /PDF_INVALID/,
+        "invalid output fails closed",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — returns only after exact cleanup is verified",
+    async function (assert) {
+      assert.expect(4);
+      const fixture = createImagePdfTestDependencies_({ observedHeightDelta: -1 });
+      const result = await convertImageBlobToPdfWithDependencies_(
+        createImagePdfTestBlob_(
+          "image/png",
+          createImagePdfTestPngBytes_(1200, 2000),
+        ),
+        fixture.dependencies,
+      );
+      assert.equal(result.pageCount, 1, "conversion returns one page");
+      assert.ok(result.dimensionsChanged, "setter difference remains observational");
+      assert.equal(fixture.state.trashCount, 1, "exact temporary Doc is trashed once");
+      assert.ok(fixture.state.trashed, "cleanup is verified before return");
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — cleanup verification failure rejects conversion",
+    async function (assert) {
+      assert.expect(2);
+      const fixture = createImagePdfTestDependencies_({ cleanupVerified: false });
+      await expectImagePdfRejection_(
+        assert,
+        function () {
+          return convertImageBlobToPdfWithDependencies_(
+            createImagePdfTestBlob_(
+              "image/png",
+              createImagePdfTestPngBytes_(1200, 2000),
+            ),
+            fixture.dependencies,
+          );
+        },
+        /TEMP_DOC_CLEANUP_FAILED/,
+        "unverified cleanup fails the conversion",
+      );
+      assert.equal(fixture.state.trashCount, 1, "cleanup was attempted exactly once");
+    },
+  );
+}
+
 function createMockOpenAIResponse(content) {
   return JSON.stringify({
     choices: [
@@ -11899,6 +12280,122 @@ async function runPdfMergeQUnitDiagnostics() {
   const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
   console.log("QUnitGS2 batch pdf-merge:\n" + report);
   return report;
+}
+
+async function runImagePdfAdapterQUnitDiagnostics() {
+  QUnitGS2.init();
+  QUnit.config.filter = "";
+  QUnit.config.module = "image-pdf-adapter";
+  registerImagePdfAdapterQUnitTests_();
+
+  const completion = new Promise(function (resolve) {
+    QUnit.done(function () {
+      resolve();
+    });
+  });
+  QUnit.start();
+  await completion;
+
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  console.log("QUnitGS2 batch image-pdf-adapter:\n" + report);
+  return report;
+}
+
+const IMAGE_PDF_ADAPTER_GAS_ACCEPTANCE_FIXTURES_ = Object.freeze({
+  jpeg: Object.freeze({
+    fileIdProperty: "IMAGE_PDF_ADAPTER_JPEG_FILE_ID",
+    filename: "PORTRAIT_JPEG.jpg",
+    mime: "image/jpeg",
+    byteLength: 178696,
+    sha256: "97ebea8211c7abf6f11c3b45304befb716b526cc078ff7659add53f07d0e0253",
+  }),
+  png: Object.freeze({
+    fileIdProperty: "IMAGE_PDF_ADAPTER_PNG_FILE_ID",
+    filename: "HIGH_RES_PNG.png",
+    mime: "image/png",
+    byteLength: 202501,
+    sha256: "ebdd38514340735e104cbfc5ce2e16b9820e69169981b7e8a9e05f3dbcd36552",
+  }),
+});
+
+async function runImagePdfAdapterGasAcceptance() {
+  const result = {
+    jpeg: await runImagePdfAdapterGasAcceptanceForFixture_(
+      IMAGE_PDF_ADAPTER_GAS_ACCEPTANCE_FIXTURES_.jpeg,
+    ),
+    png: await runImagePdfAdapterGasAcceptanceForFixture_(
+      IMAGE_PDF_ADAPTER_GAS_ACCEPTANCE_FIXTURES_.png,
+    ),
+  };
+  console.log(JSON.stringify(result));
+  return result;
+}
+
+async function runImagePdfAdapterGasAcceptanceForFixture_(fixture) {
+  const fileId = PropertiesService.getScriptProperties().getProperty(
+    fixture.fileIdProperty,
+  );
+  if (!fileId || !fileId.trim()) {
+    throw new Error(
+      "IMAGE_PDF_ACCEPTANCE_FILE_ID_MISSING: " + fixture.fileIdProperty,
+    );
+  }
+
+  const file = DriveApp.getFileById(fileId.trim());
+  const blob = file.getBlob();
+  const bytes = blob.getBytes();
+  const actualIdentity = {
+    filename: file.getName(),
+    mime: file.getMimeType(),
+    byteLength: bytes.length,
+    sha256: imagePdfAdapterAcceptanceSha256Hex_(bytes),
+  };
+  if (
+    actualIdentity.filename !== fixture.filename ||
+    actualIdentity.mime !== fixture.mime ||
+    actualIdentity.byteLength !== fixture.byteLength ||
+    actualIdentity.sha256 !== fixture.sha256
+  ) {
+    throw new Error(
+      "IMAGE_PDF_ACCEPTANCE_IDENTITY_MISMATCH: " + fixture.filename,
+    );
+  }
+
+  const conversion = await convertImageBlobToPdf(blob);
+  const pdfInspection = await validateSinglePageImagePdf_(
+    conversion.pdfBlob,
+    function (pdfBytes) {
+      return PDFLib.PDFDocument.load(pdfBytes);
+    },
+  );
+  const record = {
+    filename: actualIdentity.filename,
+    sourceMime: conversion.sourceMime,
+    sourceByteLength: actualIdentity.byteLength,
+    sourceSha256: actualIdentity.sha256,
+    sourceGeometry: conversion.sourceGeometry,
+    requestedGeometry: conversion.requestedGeometry,
+    observedGeometry: conversion.observedGeometry,
+    dimensionsChanged: conversion.dimensionsChanged,
+    pdfMime: conversion.pdfBlob.getContentType(),
+    pdfByteLength: conversion.pdfBlob.getBytes().length,
+    pageCount: conversion.pageCount,
+    pageGeometry: pdfInspection.pageGeometry,
+    cleanupVerified: true,
+  };
+  console.log(JSON.stringify(record));
+  return record;
+}
+
+function imagePdfAdapterAcceptanceSha256Hex_(bytes) {
+  return Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    bytes,
+  )
+    .map(function (value) {
+      return ((value + 256) % 256).toString(16).padStart(2, "0");
+    })
+    .join("");
 }
 
 function runLegacyProductionQUnitDiagnostics() {
