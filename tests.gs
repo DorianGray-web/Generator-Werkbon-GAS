@@ -30,6 +30,7 @@ const QUNIT_BATCH_NAMES = [
   "canonical-release",
   "pdf-merge",
   "image-pdf-adapter",
+  "pdf-package-builder",
 ];
 const QUNIT_RETIRED_BATCH_NAMES = [
   "staged-core",
@@ -11689,6 +11690,7 @@ function doGet(options) {
 
   registerPdfMergeQUnitTests_();
   registerImagePdfAdapterQUnitTests_();
+  registerPdfPackageBuilderQUnitTests_();
 
   validatePermanentStagedPartition_(stagedTestRegistrations);
   QUnit.test = registerQUnitTest;
@@ -12234,6 +12236,475 @@ function registerImagePdfAdapterQUnitTests_() {
   );
 }
 
+function registerPdfPackageBuilderQUnitTests_() {
+  function expectPackageBuilderRejection_(assert, operation, pattern, message) {
+    return Promise.resolve()
+      .then(operation)
+      .then(
+        function () {
+          assert.ok(false, message + ": expected rejection");
+        },
+        function (error) {
+          const errorMessage = error && error.message
+            ? error.message
+            : String(error);
+          assert.ok(pattern.test(errorMessage), message + ": " + errorMessage);
+        },
+      );
+  }
+
+  function createPackageBuilderPdfBlob_(pageCount, label, options) {
+    const settings = options || {};
+    return {
+      label: label,
+      getContentType: function () {
+        return settings.mime || "application/pdf";
+      },
+      getBytes: function () {
+        return settings.empty ? [] : [pageCount];
+      },
+    };
+  }
+
+  function createPackageBuilderImageBlob_(mime, label) {
+    return {
+      label: label,
+      getContentType: function () { return mime; },
+      getBytes: function () { return [7]; },
+    };
+  }
+
+  function loadPackageBuilderTestPdf_(bytes) {
+    if (bytes[0] === 255) {
+      return Promise.reject(new Error("synthetic invalid PDF"));
+    }
+    const pageCount = bytes[0];
+    return Promise.resolve({
+      getPageCount: function () { return pageCount; },
+      getPages: function () {
+        return Array.from({ length: pageCount }, function () {
+          return {
+            getSize: function () { return { width: 595.28, height: 841.89 }; },
+          };
+        });
+      },
+    });
+  }
+
+  function createPackageBuilderFile_(name, mime, blob) {
+    return {
+      getName: function () { return name; },
+      getMimeType: function () { return mime; },
+      getBlob: function () { return blob; },
+    };
+  }
+
+  function createPackageBuilderIterator_(files) {
+    let index = 0;
+    return {
+      hasNext: function () { return index < files.length; },
+      next: function () {
+        const file = files[index];
+        index += 1;
+        return file;
+      },
+    };
+  }
+
+  function createPackageBuilderDependencies_(files, options) {
+    const settings = options || {};
+    const state = {
+      recognizedFileRequests: 0,
+      adapterCalls: 0,
+      adapterInputs: [],
+      mergeCalls: 0,
+      mergeInputs: null,
+      mergeResult: null,
+    };
+    const dependencies = {
+      getRecognizedFiles: function () {
+        state.recognizedFileRequests += 1;
+        return createPackageBuilderIterator_(files || []);
+      },
+      inspectPdfBlob: function (pdfBlob) {
+        return inspectPackagePdfBlob_(pdfBlob, loadPackageBuilderTestPdf_);
+      },
+      convertImage: function (imageBlob) {
+        state.adapterCalls += 1;
+        state.adapterInputs.push(imageBlob);
+        const converted = createPackageBuilderPdfBlob_(
+          settings.imagePageCount || 1,
+          "converted-" + imageBlob.label,
+        );
+        return Promise.resolve({
+          pdfBlob: converted,
+          pageCount: settings.imagePageCount || 1,
+          dimensionsChanged: true,
+        });
+      },
+      mergePdfs: function (pdfBlobs) {
+        state.mergeCalls += 1;
+        state.mergeInputs = pdfBlobs.slice();
+        if (settings.mergeError) {
+          return Promise.reject(settings.mergeError);
+        }
+        const calculatedPages = pdfBlobs.reduce(function (total, blob) {
+          return total + blob.getBytes()[0];
+        }, 0);
+        state.mergeResult = createPackageBuilderPdfBlob_(
+          settings.finalPageCount === undefined
+            ? calculatedPages
+            : settings.finalPageCount,
+          "final-package",
+        );
+        return Promise.resolve(state.mergeResult);
+      },
+    };
+    return { dependencies: dependencies, state: state };
+  }
+
+  function packageBuilderMaterialRow_(receiptKey) {
+    return ["BON", "item", 1, 1, 1, receiptKey, ""];
+  }
+
+  QUnit.module("pdf-package-builder"); // 16 tests / 37 assertions
+
+  QUnit.test(
+    "PDF package builder — repeated receiptKey deduplicates to one source",
+    function (assert) {
+      assert.expect(2);
+      const rows = Array.from({ length: 6 }, function () {
+        return packageBuilderMaterialRow_("hubo6jpg");
+      });
+      const keys = extractUniqueEvidenceKeys_(rows);
+      assert.equal(keys.length, 1, "six identical keys resolve to one key");
+      assert.equal(keys[0], "hubo6jpg", "the persisted key is retained");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — evidence keys preserve first-seen order",
+    function (assert) {
+      assert.expect(1);
+      const keys = extractUniqueEvidenceKeys_([
+        packageBuilderMaterialRow_("A"),
+        packageBuilderMaterialRow_("B"),
+        packageBuilderMaterialRow_("A"),
+        packageBuilderMaterialRow_("C"),
+      ]);
+      assert.ok(keys.join("|") === "A|B|C", "keys are not sorted or reordered");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — blank receiptKeys are ignored",
+    function (assert) {
+      assert.expect(1);
+      const keys = extractUniqueEvidenceKeys_([
+        packageBuilderMaterialRow_(""),
+        packageBuilderMaterialRow_("   "),
+        packageBuilderMaterialRow_(null),
+        packageBuilderMaterialRow_("A"),
+      ]);
+      assert.ok(keys.length === 1 && keys[0] === "A", "only nonblank keys remain");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — missing recognized source fails closed",
+    function (assert) {
+      assert.expect(1);
+      assert.throws(
+        function () { resolveEvidenceSources_(["A"], Object.create(null)); },
+        /EVIDENCE_NOT_FOUND/,
+        "zero matches are rejected",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — exactly one recognized source resolves",
+    function (assert) {
+      assert.expect(2);
+      const file = createPackageBuilderFile_(
+        "[Recognized] A.pdf",
+        "application/pdf",
+        createPackageBuilderPdfBlob_(1, "A"),
+      );
+      const resolved = resolveEvidenceSources_(["Apdf"], { Apdf: [file] });
+      assert.equal(resolved.length, 1, "one source is returned");
+      assert.ok(resolved[0].file === file, "the exact source object is retained");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — duplicate normalized source fails ambiguous",
+    function (assert) {
+      assert.expect(1);
+      const blob = createPackageBuilderPdfBlob_(1, "A");
+      const first = createPackageBuilderFile_("[Recognized] A.pdf", "application/pdf", blob);
+      const second = createPackageBuilderFile_("[Recognized] A.pdf", "application/pdf", blob);
+      assert.throws(
+        function () {
+          resolveEvidenceSources_(["Apdf"], { Apdf: [first, second] });
+        },
+        /EVIDENCE_AMBIGUOUS/,
+        "multiple matches are rejected",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — unrelated recognized and unprocessed files are excluded",
+    function (assert) {
+      assert.expect(2);
+      const requested = createPackageBuilderFile_(
+        "[Recognized] A.pdf",
+        "application/pdf",
+        createPackageBuilderPdfBlob_(1, "A"),
+      );
+      const index = indexRecognizedFilesByReceiptKey_(
+        createPackageBuilderIterator_([
+          createPackageBuilderFile_("[Recognized] X.pdf", "application/pdf", createPackageBuilderPdfBlob_(1, "X")),
+          createPackageBuilderFile_("A.pdf", "application/pdf", createPackageBuilderPdfBlob_(1, "raw-A")),
+          requested,
+        ]),
+        ["Apdf"],
+      );
+      assert.ok(Object.keys(index).join("|") === "Apdf", "only a requested key is indexed");
+      assert.ok(index.Apdf[0] === requested, "only the exact-prefix candidate remains");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — valid multi-page PDF preserves its page count",
+    async function (assert) {
+      assert.expect(1);
+      const result = await inspectPackagePdfBlob_(
+        createPackageBuilderPdfBlob_(3, "three-pages"),
+        loadPackageBuilderTestPdf_,
+      );
+      assert.equal(result.pageCount, 3, "all source PDF pages are retained");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — empty and invalid PDFs fail closed",
+    async function (assert) {
+      assert.expect(2);
+      await expectPackageBuilderRejection_(
+        assert,
+        function () {
+          return inspectPackagePdfBlob_(
+            createPackageBuilderPdfBlob_(1, "empty", { empty: true }),
+            loadPackageBuilderTestPdf_,
+          );
+        },
+        /PDF_INVALID/,
+        "empty PDF is rejected",
+      );
+      await expectPackageBuilderRejection_(
+        assert,
+        function () {
+          return inspectPackagePdfBlob_(
+            createPackageBuilderPdfBlob_(255, "invalid"),
+            loadPackageBuilderTestPdf_,
+          );
+        },
+        /PDF_INVALID/,
+        "structurally invalid PDF is rejected",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — unsupported evidence MIME fails closed",
+    async function (assert) {
+      assert.expect(2);
+      const fixture = createPackageBuilderDependencies_([]);
+      await expectPackageBuilderRejection_(
+        assert,
+        function () {
+          return normalizePackageEvidenceSource_({
+            receiptKey: "A",
+            file: createPackageBuilderFile_(
+              "[Recognized] A.gif",
+              "image/gif",
+              createPackageBuilderImageBlob_("image/gif", "A"),
+            ),
+          }, fixture.dependencies);
+        },
+        /UNSUPPORTED_EVIDENCE_TYPE/,
+        "unsupported MIME is rejected",
+      );
+      assert.equal(fixture.state.adapterCalls, 0, "unsupported input bypasses the adapter");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — image routing delegates and preserves adapter errors",
+    async function (assert) {
+      assert.expect(6);
+      const imageBlob = createPackageBuilderImageBlob_("image/jpeg", "image-A");
+      const file = createPackageBuilderFile_(
+        "[Recognized] A.jpg",
+        "image/jpeg",
+        imageBlob,
+      );
+      const fixture = createPackageBuilderDependencies_([]);
+      const normalized = await normalizePackageEvidenceSource_(
+        { receiptKey: "Ajpg", file: file },
+        fixture.dependencies,
+      );
+      assert.equal(fixture.state.adapterCalls, 1, "the adapter is called exactly once");
+      assert.ok(fixture.state.adapterInputs[0] === imageBlob, "the source Blob is delegated unchanged");
+      assert.equal(normalized.pdfBlob.label, "converted-image-A", "adapter PDF is retained");
+      assert.equal(normalized.pageCount, 1, "adapter page count is retained");
+      assert.ok(normalized.dimensionsChanged, "adapter geometry observation is retained");
+
+      const adapterError = new Error("TEMP_DOC_CLEANUP_FAILED: synthetic cleanup");
+      let propagatedError = null;
+      try {
+        await normalizePackageEvidenceSource_(
+          { receiptKey: "Ajpg", file: file },
+          {
+            inspectPdfBlob: fixture.dependencies.inspectPdfBlob,
+            convertImage: function () { return Promise.reject(adapterError); },
+          },
+        );
+      } catch (error) {
+        propagatedError = error;
+      }
+      assert.ok(propagatedError === adapterError, "adapter errors propagate unchanged");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — expected page count sums positive integer inputs",
+    function (assert) {
+      assert.expect(2);
+      assert.equal(
+        calculateExpectedPackagePages_(2, [{ pageCount: 2 }, { pageCount: 3 }]),
+        7,
+        "Werkbon and evidence pages are summed",
+      );
+      assert.throws(
+        function () {
+          calculateExpectedPackagePages_(2, [{ pageCount: 0 }]);
+        },
+        /PDF_INVALID/,
+        "invalid evidence page count is rejected",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — merge order is Werkbon then first-seen evidence",
+    async function (assert) {
+      assert.expect(4);
+      const werkbon = createPackageBuilderPdfBlob_(3, "werkbon");
+      const pdfA = createPackageBuilderPdfBlob_(1, "A");
+      const pdfB = createPackageBuilderPdfBlob_(2, "B");
+      const fixture = createPackageBuilderDependencies_([
+        createPackageBuilderFile_("[Recognized] B.pdf", "application/pdf", pdfB),
+        createPackageBuilderFile_("[Recognized] A.pdf", "application/pdf", pdfA),
+      ]);
+      const result = await buildWerkbonPdfPackageWithDependencies_({
+        bonId: "BON",
+        werkbonPdfBlob: werkbon,
+        materialRows: [packageBuilderMaterialRow_("Apdf"), packageBuilderMaterialRow_("Bpdf")],
+      }, fixture.dependencies);
+      assert.equal(fixture.state.mergeCalls, 1, "merge is called exactly once");
+      assert.equal(fixture.state.mergeInputs.length, 3, "three ordered PDFs are merged");
+      assert.ok(
+        fixture.state.mergeInputs.map(function (blob) { return blob.label; }).join("|") ===
+          "werkbon|A|B",
+        "Drive order does not change business order",
+      );
+      assert.ok(result === fixture.state.mergeResult, "the validated merged Blob is returned");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — zero evidence returns original Werkbon without external work",
+    async function (assert) {
+      assert.expect(4);
+      const werkbon = createPackageBuilderPdfBlob_(2, "werkbon");
+      const fixture = createPackageBuilderDependencies_([]);
+      const result = await buildWerkbonPdfPackageWithDependencies_({
+        bonId: "BON",
+        werkbonPdfBlob: werkbon,
+        materialRows: [packageBuilderMaterialRow_(" ")],
+      }, fixture.dependencies);
+      assert.ok(result === werkbon, "the original Werkbon Blob is returned");
+      assert.equal(fixture.state.recognizedFileRequests, 0, "Drive resolution is bypassed");
+      assert.equal(fixture.state.adapterCalls, 0, "the image adapter is bypassed");
+      assert.equal(fixture.state.mergeCalls, 0, "the merge primitive is bypassed");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — mixed two-PDF two-image package preserves full order",
+    async function (assert) {
+      assert.expect(5);
+      const werkbon = createPackageBuilderPdfBlob_(2, "werkbon");
+      const pdfA = createPackageBuilderPdfBlob_(2, "pdf-A");
+      const pdfB = createPackageBuilderPdfBlob_(3, "pdf-B");
+      const imageA = createPackageBuilderImageBlob_("image/jpeg", "image-A");
+      const imageB = createPackageBuilderImageBlob_("image/png", "image-B");
+      const fixture = createPackageBuilderDependencies_([
+        createPackageBuilderFile_("[Recognized] image-B.png", "image/png", imageB),
+        createPackageBuilderFile_("[Recognized] pdf-B.pdf", "application/pdf", pdfB),
+        createPackageBuilderFile_("[Recognized] pdf-A.pdf", "application/pdf", pdfA),
+        createPackageBuilderFile_("[Recognized] image-A.jpg", "image/jpeg", imageA),
+      ]);
+      const result = await buildWerkbonPdfPackageWithDependencies_({
+        bonId: "BON",
+        werkbonPdfBlob: werkbon,
+        materialRows: [
+          packageBuilderMaterialRow_("pdfApdf"),
+          packageBuilderMaterialRow_("pdfBpdf"),
+          packageBuilderMaterialRow_("imageAjpg"),
+          packageBuilderMaterialRow_("imageBpng"),
+        ],
+      }, fixture.dependencies);
+      assert.equal(fixture.state.recognizedFileRequests, 1, "the folder is scanned once");
+      assert.equal(fixture.state.adapterCalls, 2, "both images use the adapter once");
+      assert.equal(fixture.state.mergeCalls, 1, "the ordered list is merged once");
+      assert.ok(
+        fixture.state.mergeInputs.map(function (blob) { return blob.label; }).join("|") ===
+          "werkbon|pdf-A|pdf-B|converted-image-A|converted-image-B",
+        "mixed sources follow receiptKey order",
+      );
+      assert.equal(result.getBytes()[0], 9, "expected and actual package pages equal nine");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — final page-count mismatch fails closed",
+    async function (assert) {
+      assert.expect(1);
+      const werkbon = createPackageBuilderPdfBlob_(2, "werkbon");
+      const evidence = createPackageBuilderPdfBlob_(1, "A");
+      const fixture = createPackageBuilderDependencies_([
+        createPackageBuilderFile_("[Recognized] A.pdf", "application/pdf", evidence),
+      ], { finalPageCount: 4 });
+      await expectPackageBuilderRejection_(
+        assert,
+        function () {
+          return buildWerkbonPdfPackageWithDependencies_({
+            bonId: "BON",
+            werkbonPdfBlob: werkbon,
+            materialRows: [packageBuilderMaterialRow_("Apdf")],
+          }, fixture.dependencies);
+        },
+        /PACKAGE_PAGE_COUNT_MISMATCH/,
+        "final mismatch is rejected",
+      );
+    },
+  );
+}
+
 function createMockOpenAIResponse(content) {
   return JSON.stringify({
     choices: [
@@ -12298,6 +12769,25 @@ async function runImagePdfAdapterQUnitDiagnostics() {
 
   const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
   console.log("QUnitGS2 batch image-pdf-adapter:\n" + report);
+  return report;
+}
+
+async function runPdfPackageBuilderQUnitDiagnostics() {
+  QUnitGS2.init();
+  QUnit.config.filter = "";
+  QUnit.config.module = "pdf-package-builder";
+  registerPdfPackageBuilderQUnitTests_();
+
+  const completion = new Promise(function (resolve) {
+    QUnit.done(function () {
+      resolve();
+    });
+  });
+  QUnit.start();
+  await completion;
+
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  console.log("QUnitGS2 batch pdf-package-builder:\n" + report);
   return report;
 }
 
