@@ -271,12 +271,14 @@ async function inspectPackagePdfBlob_(pdfBlob, loadPdfDocument) {
     throw pdfPackageError_("PDF_INVALID", "Package PDF input is empty.");
   }
 
-  const loader = loadPdfDocument || function (bytes) {
-    return PDFLib.PDFDocument.load(bytes);
+  const loader = loadPdfDocument || function (bytes, options) {
+    return PDFLib.PDFDocument.load(bytes, options);
   };
   let document;
   try {
-    document = await loader(pdfMergeGasBytesToUint8Array_(gasBytes));
+    document = await loader(pdfMergeGasBytesToUint8Array_(gasBytes), {
+      parseSpeed: PDFLib.ParseSpeeds.Fastest,
+    });
   } catch (error) {
     throw pdfPackageError_(
       "PDF_INVALID",

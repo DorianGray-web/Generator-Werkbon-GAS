@@ -237,7 +237,7 @@ function parseImagePdfJpegGeometry_(bytes) {
 
   let offset = 2;
   let geometry = null;
-  let unresolvedExif = false;
+  let hasUnresolvedExif = false;
 
   while (offset < bytes.length) {
     while (offset < bytes.length && bytes[offset] !== 0xff) {
@@ -263,12 +263,24 @@ function parseImagePdfJpegGeometry_(bytes) {
       continue;
     }
     if (offset + 1 >= bytes.length) {
+      if (marker === 0xe1) {
+        throw imagePdfError_(
+          "IMAGE_GEOMETRY_UNRESOLVED",
+          "JPEG APP1 segment length is invalid.",
+        );
+      }
       break;
     }
 
     const segmentLength = bytes[offset] * 256 + bytes[offset + 1];
     const segmentEnd = offset + segmentLength;
     if (segmentLength < 2 || segmentEnd > bytes.length) {
+      if (marker === 0xe1) {
+        throw imagePdfError_(
+          "IMAGE_GEOMETRY_UNRESOLVED",
+          "JPEG APP1 segment length is invalid.",
+        );
+      }
       break;
     }
 
@@ -282,7 +294,15 @@ function parseImagePdfJpegGeometry_(bytes) {
       bytes[offset + 6] === 0x00 &&
       bytes[offset + 7] === 0x00
     ) {
-      unresolvedExif = true;
+      const orientation = parseJpegExifOrientation_(
+        bytes,
+        offset + 8,
+        segmentEnd,
+      );
+      if (orientation === null) {
+        hasUnresolvedExif = true;
+      }
+      // 1 (SHORT or LONG) and 0 (LONG only) are accepted as identity; do not set flag
     }
 
     if (imagePdfIsJpegStartOfFrame_(marker)) {
@@ -297,7 +317,7 @@ function parseImagePdfJpegGeometry_(bytes) {
     offset = segmentEnd;
   }
 
-  if (unresolvedExif) {
+  if (hasUnresolvedExif) {
     throw imagePdfError_(
       "IMAGE_GEOMETRY_UNRESOLVED",
       "JPEG contains EXIF metadata whose display orientation is unresolved.",
@@ -320,6 +340,74 @@ function imagePdfIsJpegStartOfFrame_(marker) {
     marker !== 0xc8 &&
     marker !== 0xcc
   );
+}
+
+function parseJpegExifOrientation_(bytes, tiffOffset, segmentEnd) {
+  if (!bytes || tiffOffset + 8 > segmentEnd || segmentEnd > bytes.length) {
+    return null;
+  }
+
+  const b0 = bytes[tiffOffset];
+  const b1 = bytes[tiffOffset + 1];
+  let littleEndian;
+  if (b0 === 0x49 && b1 === 0x49) {
+    littleEndian = true;
+  } else if (b0 === 0x4d && b1 === 0x4d) {
+    littleEndian = false;
+  } else {
+    return null;
+  }
+
+  const magic = imagePdfReadUint16_(bytes, tiffOffset + 2, littleEndian);
+  if (magic !== 0x002a) {
+    return null;
+  }
+
+  const ifdOffset = imagePdfReadUint32Endian_(bytes, tiffOffset + 4, littleEndian);
+  if (ifdOffset < 8) {
+    return null;
+  }
+  const ifdStart = tiffOffset + ifdOffset;
+  if (ifdStart + 2 > segmentEnd) {
+    return null;
+  }
+
+  const entryCount = imagePdfReadUint16_(bytes, ifdStart, littleEndian);
+  const entriesStart = ifdStart + 2;
+  const tableEnd = entriesStart + entryCount * 12;
+  if (tableEnd > segmentEnd) {
+    return null;
+  }
+
+  for (let i = 0; i < entryCount; i++) {
+    const entryPos = entriesStart + i * 12;
+    const tag = imagePdfReadUint16_(bytes, entryPos, littleEndian);
+    if (tag === 0x0112) {
+      const type = imagePdfReadUint16_(bytes, entryPos + 2, littleEndian);
+      const count = imagePdfReadUint32Endian_(bytes, entryPos + 4, littleEndian);
+      if (count !== 1) {
+        return null;
+      }
+
+      let value;
+      if (type === 3) { // SHORT
+        value = imagePdfReadUint16_(bytes, entryPos + 8, littleEndian);
+        if (value === 1) {
+          return 1;
+        }
+        return null; // SHORT 0 or other -> unresolved
+      } else if (type === 4) { // LONG
+        value = imagePdfReadUint32Endian_(bytes, entryPos + 8, littleEndian);
+        if (value === 1 || value === 0) {
+          return value;
+        }
+        return null;
+      }
+      return null; // unsupported type
+    }
+  }
+
+  return null; // no Orientation tag
 }
 
 function calculateImagePdfContainSizing_(
@@ -457,6 +545,30 @@ function imagePdfGeometryRecord_(width, height) {
 }
 
 function imagePdfReadUint32_(bytes, offset) {
+  return (
+    bytes[offset] * 0x1000000 +
+    bytes[offset + 1] * 0x10000 +
+    bytes[offset + 2] * 0x100 +
+    bytes[offset + 3]
+  );
+}
+
+function imagePdfReadUint16_(bytes, offset, littleEndian) {
+  if (littleEndian) {
+    return bytes[offset] | (bytes[offset + 1] << 8);
+  }
+  return (bytes[offset] << 8) | bytes[offset + 1];
+}
+
+function imagePdfReadUint32Endian_(bytes, offset, littleEndian) {
+  if (littleEndian) {
+    return (
+      bytes[offset] +
+      bytes[offset + 1] * 0x100 +
+      bytes[offset + 2] * 0x10000 +
+      bytes[offset + 3] * 0x1000000
+    );
+  }
   return (
     bytes[offset] * 0x1000000 +
     bytes[offset + 1] * 0x10000 +

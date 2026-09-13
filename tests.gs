@@ -11720,7 +11720,7 @@ function registerPdfMergeQUnitTests_() {
     );
   }
 
-  QUnit.module("pdf-merge"); // 6 tests / 12 assertions
+  QUnit.module("pdf-merge"); // 7 tests / 14 assertions
 
   QUnit.test(
     "PDF merge — preserves source and page order through a validated Blob",
@@ -11776,6 +11776,48 @@ function registerPdfMergeQUnitTests_() {
           [520, 620],
         ]),
         "merged pages preserve caller-provided source and page order",
+      );
+    },
+  );
+
+  QUnit.test(
+    "PDF merge — all merge-local loads use GAS-safe fastest parse speed",
+    async function (assert) {
+      assert.expect(2);
+      const sourceDocument = await PDFLib.PDFDocument.create();
+      sourceDocument.addPage([300, 400]);
+      const sourceBytes = await sourceDocument.save({
+        objectsPerTick: Infinity,
+      });
+      const sourceBlob = Utilities.newBlob(
+        pdfMergeUint8ArrayToGasBytes_(sourceBytes),
+        "application/pdf",
+        "synthetic-fastest-load.pdf",
+      );
+      const originalLoad = PDFLib.PDFDocument.load;
+      const observedOptions = [];
+      PDFLib.PDFDocument.load = function (bytes, options) {
+        observedOptions.push(options);
+        return originalLoad.call(PDFLib.PDFDocument, bytes, options);
+      };
+
+      try {
+        await mergePdfBlobsInOrder([sourceBlob]);
+      } finally {
+        PDFLib.PDFDocument.load = originalLoad;
+      }
+
+      assert.equal(
+        observedOptions.length,
+        2,
+        "source and merged-output loads are both observed",
+      );
+      assert.ok(
+        observedOptions.every(function (options) {
+          return options &&
+            options.parseSpeed === PDFLib.ParseSpeeds.Fastest;
+        }),
+        "every merge-local load disables timer-backed parser yields",
       );
     },
   );
@@ -11920,6 +11962,72 @@ function registerImagePdfAdapterQUnitTests_() {
     return bytes;
   }
 
+  function imagePdfTestUint16Bytes_(value, littleEndian) {
+    return littleEndian
+      ? [value & 0xff, (value >>> 8) & 0xff]
+      : [(value >>> 8) & 0xff, value & 0xff];
+  }
+
+  function imagePdfTestUint32Bytes_(value, littleEndian) {
+    return littleEndian
+      ? [
+        value & 0xff,
+        (value >>> 8) & 0xff,
+        (value >>> 16) & 0xff,
+        (value >>> 24) & 0xff,
+      ]
+      : [
+        (value >>> 24) & 0xff,
+        (value >>> 16) & 0xff,
+        (value >>> 8) & 0xff,
+        value & 0xff,
+      ];
+  }
+
+  function createImagePdfTestExifJpegBytes_(options) {
+    const settings = options || {};
+    const littleEndian = settings.littleEndian === true;
+    const type = settings.type === undefined ? 3 : settings.type;
+    const value = settings.value === undefined ? 1 : settings.value;
+    const tag = settings.orientationAbsent ? 0x0100 : 0x0112;
+    const orientationCount = settings.orientationCount === undefined
+      ? 1
+      : settings.orientationCount;
+    const ifdOffset = settings.ifdOffset === undefined ? 8 : settings.ifdOffset;
+    const entryValue = type === 3
+      ? imagePdfTestUint16Bytes_(value, littleEndian).concat([0x00, 0x00])
+      : imagePdfTestUint32Bytes_(value, littleEndian);
+    const entry = []
+      .concat(imagePdfTestUint16Bytes_(tag, littleEndian))
+      .concat(imagePdfTestUint16Bytes_(type, littleEndian))
+      .concat(imagePdfTestUint32Bytes_(orientationCount, littleEndian))
+      .concat(entryValue);
+    const tiff = []
+      .concat(littleEndian ? [0x49, 0x49] : [0x4d, 0x4d])
+      .concat(imagePdfTestUint16Bytes_(settings.badMagic ? 0x002b : 0x002a, littleEndian))
+      .concat(imagePdfTestUint32Bytes_(ifdOffset, littleEndian));
+    while (tiff.length < 8) tiff.push(0x00);
+    tiff.push.apply(
+      tiff,
+      imagePdfTestUint16Bytes_(settings.declaredEntryCount || 1, littleEndian),
+    );
+    tiff.push.apply(tiff, entry);
+
+    const bytes = [0xff, 0xd8];
+    bytes.push(0xff, 0xe1);
+    if (settings.tiffOutsideApp1) {
+      bytes.push(0x00, 0x08, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00);
+      bytes.push.apply(bytes, tiff);
+    } else {
+      const payload = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00].concat(tiff);
+      const segmentLength = payload.length + 2;
+      bytes.push((segmentLength >>> 8) & 0xff, segmentLength & 0xff);
+      bytes.push.apply(bytes, payload);
+    }
+    bytes.push.apply(bytes, createImagePdfTestJpegBytes_(false).slice(2));
+    return bytes;
+  }
+
   function createImagePdfTestDependencies_(options) {
     const settings = options || {};
     const state = {
@@ -12005,7 +12113,7 @@ function registerImagePdfAdapterQUnitTests_() {
     return { dependencies: dependencies, state: state, pdfBlob: pdfBlob };
   }
 
-  QUnit.module("image-pdf-adapter"); // 13 tests / 37 assertions
+  QUnit.module("image-pdf-adapter"); // 17 tests / 50 assertions
 
   QUnit.test(
     "Image PDF adapter — reads PNG IHDR geometry",
@@ -12053,6 +12161,115 @@ function registerImagePdfAdapterQUnitTests_() {
         function () { parseImagePdfJpegGeometry_(createImagePdfTestJpegBytes_(true)); },
         /IMAGE_GEOMETRY_UNRESOLVED/,
         "EXIF-bearing JPEG fails closed without orientation parsing",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — accepts only approved identity EXIF representations",
+    function (assert) {
+      assert.expect(3);
+      assert.equal(
+        parseImagePdfJpegGeometry_(createImagePdfTestExifJpegBytes_({
+          littleEndian: true,
+          type: 3,
+          value: 1,
+        })).widthPixels,
+        2000,
+        "SHORT orientation 1 is identity",
+      );
+      assert.equal(
+        parseImagePdfJpegGeometry_(createImagePdfTestExifJpegBytes_({
+          type: 4,
+          value: 1,
+        })).widthPixels,
+        2000,
+        "LONG orientation 1 is identity",
+      );
+      assert.equal(
+        parseImagePdfJpegGeometry_(createImagePdfTestExifJpegBytes_({
+          type: 4,
+          value: 0,
+        })).widthPixels,
+        2000,
+        "LONG orientation 0 is the bounded observed identity case",
+      );
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects unresolved EXIF orientation representations",
+    function (assert) {
+      assert.expect(5);
+      [
+        { type: 3, value: 0 },
+        { type: 3, value: 6 },
+        { orientationAbsent: true },
+        { type: 5, value: 1 },
+        { orientationCount: 2 },
+      ].forEach(function (options) {
+        assert.throws(
+          function () {
+            parseImagePdfJpegGeometry_(createImagePdfTestExifJpegBytes_(options));
+          },
+          /IMAGE_GEOMETRY_UNRESOLVED/,
+          "unsupported orientation evidence fails closed",
+        );
+      });
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — rejects malformed TIFF metadata and IFD0 offsets",
+    function (assert) {
+      assert.expect(2);
+      [{ badMagic: true }, { ifdOffset: 6 }].forEach(function (options) {
+        assert.throws(
+          function () {
+            parseImagePdfJpegGeometry_(createImagePdfTestExifJpegBytes_(options));
+          },
+          /IMAGE_GEOMETRY_UNRESOLVED/,
+          "malformed TIFF structure fails closed",
+        );
+      });
+    },
+  );
+
+  QUnit.test(
+    "Image PDF adapter — confines EXIF parsing to complete APP1 structures",
+    function (assert) {
+      assert.expect(3);
+      assert.throws(
+        function () {
+          parseImagePdfJpegGeometry_(createImagePdfTestExifJpegBytes_({
+            declaredEntryCount: 2,
+          }));
+        },
+        /IMAGE_GEOMETRY_UNRESOLVED/,
+        "the complete declared IFD table is required",
+      );
+      assert.throws(
+        function () {
+          parseImagePdfJpegGeometry_(createImagePdfTestExifJpegBytes_({
+            tiffOutsideApp1: true,
+            type: 4,
+            value: 0,
+          }));
+        },
+        /IMAGE_GEOMETRY_UNRESOLVED/,
+        "TIFF bytes outside APP1 are ignored and rejected",
+      );
+      const malformedLength = createImagePdfTestJpegBytes_(false);
+      malformedLength.splice(
+        malformedLength.length - 2,
+        0,
+        0xff, 0xe1, 0x00, 0x40,
+        0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+      );
+      assert.throws(
+        function () { parseImagePdfJpegGeometry_(malformedLength); },
+        /IMAGE_GEOMETRY_UNRESOLVED/,
+        "malformed APP1 length cannot reuse earlier SOF geometry",
       );
     },
   );
@@ -12369,7 +12586,7 @@ function registerPdfPackageBuilderQUnitTests_() {
     return ["BON", "item", 1, 1, 1, receiptKey, ""];
   }
 
-  QUnit.module("pdf-package-builder"); // 16 tests / 37 assertions
+  QUnit.module("pdf-package-builder"); // 17 tests / 39 assertions
 
   QUnit.test(
     "PDF package builder — repeated receiptKey deduplicates to one source",
@@ -12487,6 +12704,27 @@ function registerPdfPackageBuilderQUnitTests_() {
         loadPackageBuilderTestPdf_,
       );
       assert.equal(result.pageCount, 3, "all source PDF pages are retained");
+    },
+  );
+
+  QUnit.test(
+    "PDF package builder — inspection uses GAS-safe fastest parse speed",
+    async function (assert) {
+      assert.expect(2);
+      let observedOptions = null;
+      const result = await inspectPackagePdfBlob_(
+        createPackageBuilderPdfBlob_(1, "fastest-parse"),
+        function (bytes, options) {
+          observedOptions = options;
+          return loadPackageBuilderTestPdf_(bytes);
+        },
+      );
+      assert.equal(
+        observedOptions.parseSpeed,
+        PDFLib.ParseSpeeds.Fastest,
+        "inspection disables timer-backed parser yields",
+      );
+      assert.equal(result.pageCount, 1, "inspection result remains unchanged");
     },
   );
 

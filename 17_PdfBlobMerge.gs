@@ -66,6 +66,7 @@ async function mergePdfBlobsInOrder(pdfBlobs) {
     try {
       sourceDocument = await PDFDocument.load(
         pdfMergeGasBytesToUint8Array_(sourceGasBytes),
+        { parseSpeed: PDFLib.ParseSpeeds.Fastest },
       );
     } catch (error) {
       throw new Error(
@@ -124,6 +125,7 @@ async function mergePdfBlobsInOrder(pdfBlobs) {
   try {
     validatedDocument = await PDFDocument.load(
       pdfMergeGasBytesToUint8Array_(mergedBlobBytes),
+      { parseSpeed: PDFLib.ParseSpeeds.Fastest },
     );
   } catch (error) {
     throw new Error(
