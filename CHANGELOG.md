@@ -15,7 +15,7 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
-## [1.9.0] - Unreleased
+## [1.9.0] - 2026-09-13
 
 ### Added
 

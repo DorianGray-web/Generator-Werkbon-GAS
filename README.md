@@ -7,8 +7,7 @@
 ![Architecture](https://img.shields.io/badge/Architecture-Modular-blueviolet)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
-![Release](https://img.shields.io/badge/Release-v1.8.0-blue)
-![Release target](https://img.shields.io/badge/Release%20target-v1.9.0-orange)
+![Release](https://img.shields.io/badge/Release-v1.9.0-blue)
 
 ---
 
