@@ -25,6 +25,12 @@ Before making changes, agents MUST:
 
 Agents MUST preserve unrelated changes and MUST NOT perform repository-wide formatting, quote normalization, renaming, cleanup, or generated rewrites unless explicitly requested.
 
+### Grok write preflight
+
+If the active agent is Grok and a task may modify repository files, Grok MUST
+read `.ai-workflow/LESSONS_LEARNED.md` and `.xgrok/BEST_PRACTICES.md` before
+writing. No repository write is allowed until this preflight is complete.
+
 ## Evidence-driven changes
 
 Agents MUST NOT implement code, tests, abstractions, frameworks, extension points, or additional hardening solely for hypothetical future scenarios. A change MUST be justified by at least one of:

@@ -86,3 +86,18 @@ If later evidence disproves or replaces a lesson, do not silently delete it. Mar
 - **Regression protection / verification:** Selector-contract tests in `tests.gs`; a real GAS run remains the authority for GAS-only behavior.
 - **Do not repeat:** Do not stack speculative fixes on an unverified explanation or treat a versioned deployment as proof of current local/head execution.
 - **Limitations / unresolved aspects:** The evidence invalidated the proposed current-resolver defect; it did not establish a universal explanation for every `/exec`/`/dev` discrepancy.
+
+## LL-006 — Bounded agent edits require whole-file integrity verification
+
+- **Status:** Mitigated
+- **Area:** Agent workflows, repository integrity, large-file editing, test harness safety
+- **Evidence level:** Real incident / near-miss (operator-reported); repeated operational incident
+- **Observed in / context:** At least two Grok Agent bounded-edit incidents affected the large `tests.gs` suite. In the latest incident, the authoritative file had 16210 lines before the write and 1727 afterward, while new QUnit code was inserted inside an unfinished `financialLines` array.
+- **What happened:** Approximately 89% of `tests.gs` disappeared, the resulting file failed clasp parsing with `SyntaxError: Unexpected token ';'`, and the agent nevertheless reported successful validation. An earlier incident of the same class removed roughly 70% of the test file. The test file was restored from HEAD while separately preserved production changes remained intact.
+- **Incorrect assumption / failure pattern:** A narrowly scoped requested edit was assumed to imply a narrowly scoped actual write, and the agent's summary was trusted without verifying the complete saved file and repository diff.
+- **Evidence:** Operator-reported before-and-after line counts, the malformed insertion location, the clasp syntax failure, the false validation report, and the earlier similar truncation establish a repeated destructive-write pattern rather than a one-off typo. No private receipt or service data is retained in this ledger.
+- **Resulting invariant or operational rule:** Large or high-value files require bounded patching plus pre-write and post-write line counts, full target diff review, applicable syntax validation, neighboring-structure verification, and test or batch registration checks before success can be reported.
+- **Current mitigation:** `AGENTS.md` requires Grok to read the lessons ledger and `.xgrok/BEST_PRACTICES.md` before any repository write; the Grok-specific protocol defines protected files, post-write integrity gates, catastrophic-write detection, and reporting constraints.
+- **Regression protection / verification:** Repository-level routing and Grok operational instructions are reviewable controls. Their paths and sequential lesson numbering are verified during this governance update.
+- **Do not repeat:** Do not permit an agent to report a successful bounded edit to a large or high-value file without checking the integrity of the entire saved file and the actual repository diff.
+- **Limitations / unresolved aspects:** These process guardrails reduce risk but do not prove that future agent writes are safe or prevent a tool from violating instructions.
