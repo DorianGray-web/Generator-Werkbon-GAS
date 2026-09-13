@@ -8,6 +8,7 @@
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
 ![Release](https://img.shields.io/badge/Release-v1.8.0-blue)
+![Release target](https://img.shields.io/badge/Release%20target-v1.9.0-orange)
 
 ---
 
@@ -15,7 +16,7 @@
 
 Generator-Werkbon-GAS is a modular Google Apps Script project designed to automate the creation of maintenance work orders (`Werkbon`).
 
-The system uses OpenAI GPT-4o to process construction receipt images and PDF invoices, extract purchased materials, store them in Google Sheets, and generate a ready-to-print PDF work order using a Google Docs template.
+The system uses OpenAI GPT-4o to process construction receipt images and PDF invoices, extract purchased materials, store them in Google Sheets, and generate a ready-to-print archival PDF package containing the work order and its receipt evidence.
 
 The project was developed to reduce repetitive administrative work and demonstrate practical AI integration into everyday business workflows.
 
@@ -45,6 +46,9 @@ The project was developed to reduce repetitive administrative work and demonstra
 - Google Sheets integration
 - Google Docs template processing
 - Automatic PDF generation
+- Archival Werkbon PDF packaging with the Werkbon first and unique receipt evidence in persisted first-seen row order
+- Existing PDF evidence passthrough and JPEG/PNG evidence conversion through Google Docs
+- Final package page-count validation and exactly one final PDF persistence
 - Google Drive integration
 - Optimized PDF export with fallback mode
 - Secure configuration using Script Properties
@@ -81,7 +85,25 @@ Google Sheets
 Google Docs Template
         │
         ▼
-PDF Work Order
+Werkbon PDF Blob
+        │
+        ▼
+Collect Persisted Receipt Keys
+        │
+        ▼
+Resolve Recognized Evidence
+        │
+        ├── Existing PDF
+        └── JPEG / PNG → One-page PDF
+        │
+        ▼
+Ordered PDF Merge
+        │
+        ▼
+Final Page-count Validation
+        │
+        ▼
+Persist One Archival PDF
 ```
 
 ---
@@ -112,6 +134,9 @@ Generator-Werkbon-GAS/
 ├── 05_WerkbonGenerator.gs
 ├── 06_DocumentTables.gs
 ├── 07_DataHelpers.gs
+├── 17_PdfBlobMerge.gs
+├── 20_ImageToPdfAdapter.gs
+├── 21_PdfPackageBuilder.gs
 ├── appsscript.json
 ├── README.md
 ├── CHANGELOG.md
@@ -132,6 +157,9 @@ Generator-Werkbon-GAS/
 | `05_WerkbonGenerator.gs` | Work-order preparation and PDF generation |
 | `06_DocumentTables.gs` | Google Docs tables and dynamic content |
 | `07_DataHelpers.gs` | Data filtering, normalization and formatting |
+| `17_PdfBlobMerge.gs` | Ordered PDF Blob merging and merged page-count verification |
+| `20_ImageToPdfAdapter.gs` | Fail-closed JPEG/PNG evidence conversion to one-page PDF Blobs |
+| `21_PdfPackageBuilder.gs` | Evidence resolution, normalization, ordering and archival package validation |
 
 ---
 
@@ -186,7 +214,7 @@ Before connecting or testing this version:
 2. Go to **Extensions → Apps Script**.
 3. Verify which bound project belongs to the copied sheet.
 4. Remove obsolete copied script code or old bound project copies from the test environment.
-5. Ensure that only the intended v1.8.0 implementation is used.
+5. Ensure that only the intended v1.9.0 release-target implementation is used.
 6. Reconfigure Script Properties in the copied project because they may not be transferred automatically.
 
 > Do not delete the production Apps Script project connected to the original working spreadsheet.
@@ -309,6 +337,16 @@ PDF ingestion was validated with one controlled real Lampdirect invoice in an is
 
 Multiple-file processing is supported by the common processing loop, while multi-PDF end-to-end validation remains future validation work.
 
+### v1.9.0 archival PDF package validation
+
+v1.9.0 is the current release target. The archival package places the Werkbon pages first, then includes each unique recognized evidence source according to the first occurrence of its `receiptKey` in persisted Materials rows. Existing PDFs are retained as PDFs; JPEG and PNG evidence is converted through Google Docs to a one-page PDF before the ordered merge. The completed package is persisted once only after its actual page count matches the expected total.
+
+The accepted real workflow produced a six-page package: two Werkbon pages, followed by PDF, converted JPEG, PDF, and converted JPEG evidence in persisted first-seen order. The package contained the expected six pages, the final PDF was persisted, and temporary Google Docs resources were cleaned up.
+
+Image conversion supports images without EXIF orientation metadata and the bounded observed identity-orientation cases. EXIF orientations 2–8 and malformed or unresolved EXIF fail closed. Small setter-induced dimension changes are diagnostic only; exact aspect-ratio equality is not guaranteed.
+
+The staged receipt extraction path may intermittently report `structure:INVALID_SUMMARY_SOURCE_LINE`. This known issue remains outside the archival PDF packaging scope and did not block the accepted Phase D workflow.
+
 ---
 
 ## 📸 Screenshots
@@ -333,6 +371,13 @@ v1.8.0 test suite, confirmed in the isolated test GAS environment:
 - 115 assertions
 - 115 passed
 - 0 failed
+
+v1.9.0 release-target archival packaging gates, confirmed in the isolated test GAS environment:
+
+- image-pdf-adapter: 17 tests, 50 assertions, 50 passed, 0 failed
+- pdf-package-builder: 17 tests, 39 assertions, 39 passed, 0 failed
+- pdf-merge: 7 tests, 14 assertions, 14 passed, 0 failed
+- werkbon-export-integration: 11 tests, 43 assertions, 43 passed, 0 failed
 
 ### Google Sheets
 

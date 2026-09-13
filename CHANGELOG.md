@@ -15,6 +15,42 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.9.0] - Unreleased
+
+### Added
+
+- Added archival PDF package generation containing the Werkbon followed by its recognized receipt evidence.
+- Added deterministic evidence inclusion based on unique `receiptKey` values in persisted first-seen Materials row order.
+- Added JPEG and PNG evidence normalization to one-page PDFs through Google Docs; existing PDF evidence remains PDF input.
+- Added final package page-count validation before persistence of exactly one final archival PDF.
+
+### Changed
+
+- Hardened pdf-lib loading for the Google Apps Script runtime by using the GAS-safe fastest parse configuration for merge sources, merged-output verification, and package inspection.
+
+### Fixed
+
+- Added bounded JPEG EXIF identity compatibility for the observed supported cases while unsupported, malformed, or unresolved orientations continue to fail closed.
+- Fixed merge and package PDF loading paths that could reach pdf-lib scheduling code requiring the unavailable `setTimeout` API in Google Apps Script.
+
+### Testing
+
+- Confirmed `image-pdf-adapter` in isolated GAS: **17 tests, 50 assertions, 50 passed, 0 failed**.
+- Confirmed `pdf-package-builder` in isolated GAS: **17 tests, 39 assertions, 39 passed, 0 failed**.
+- Confirmed `pdf-merge` in isolated GAS: **7 tests, 14 assertions, 14 passed, 0 failed**.
+- Confirmed `werkbon-export-integration` in isolated GAS: **11 tests, 43 assertions, 43 passed, 0 failed**.
+
+### Validation
+
+- Completed the accepted real Phase D workflow with an archival package of **6 expected pages and 6 actual pages**: two Werkbon pages followed by PDF, converted JPEG, PDF, and converted JPEG evidence in persisted first-seen order.
+- Confirmed final package persistence as one PDF and cleanup of temporary Google Docs resources.
+
+### Known Issues
+
+- Staged receipt extraction may intermittently report `structure:INVALID_SUMMARY_SOURCE_LINE`; this remains outside the Phase D archival packaging scope.
+
+---
+
 ## [1.8.0] - 2026-09-02
 
 ### Added
