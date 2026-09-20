@@ -304,8 +304,10 @@ function buildOpenAIStage1V2Payload_(mimeType, base64Data) {
     "For each line, copy only text visibly present on that same physical line into leadingQuantityText, descriptionText, unitPriceText, and lineTotalText; use null when a column is blank or not visible. " +
     "Do not create canonical products. Do not merge physical lines. Do not move a quantity or price between lines. " +
     "Do not calculate, reconcile, correct, or repair arithmetic. Do not use a printed total or product count to change any line observation. " +
-    'Classify roleEvidence only as "header", "product", "summary", or "unknown". ' +
-    'roleEvidence is perception evidence, not authoritative truth; use roleEvidence "unknown" whenever the visual role is uncertain. ' +
+    'Classify actual purchased-material evidence as roleEvidence "product". Use roleEvidence "summary" only for primary bounded summary anchors such as the printed total and optional printed product count. ' +
+    'Use roleEvidence "informational" only for explicit non-product terminal receipt observations such as payment or tender lines, change lines, VAT breakdown lines, or other clearly non-product informational rows. Preserve each such visible line as its own observedLines entry. ' +
+    'Classify roleEvidence only as "header", "product", "summary", "informational", or "unknown". ' +
+    'roleEvidence is perception evidence, not authoritative truth; never use "informational" to hide an ambiguous or potentially product-like row, and use roleEvidence "unknown" whenever the visual role is uncertain or unresolved. ' +
     "For printedProductCount and printedTotal, preserve rawText and separately copy the visible labelText and valueText, linking each object to its physical observed line through sourceLineOrder. " +
     'For printedTotal, totalTypeEvidence may be "inclVAT" or "exclVAT" only when that meaning is visually explicit; otherwise totalTypeEvidence must be null. ' +
     'Never infer "inclVAT" merely from a label such as "Totaal". ' +
@@ -583,7 +585,13 @@ function buildStage1V2JsonSchema_() {
             },
             roleEvidence: {
               type: "string",
-              enum: ["header", "product", "summary", "unknown"],
+              enum: [
+                "header",
+                "product",
+                "summary",
+                "informational",
+                "unknown",
+              ],
             },
           },
           required: [
@@ -710,7 +718,7 @@ function validateStage1V2Evidence_(evidence) {
       throw new Error("Stage-1-v2 " + path + ".indentation is unsupported.");
     }
     if (
-      ["header", "product", "summary", "unknown"].indexOf(
+      ["header", "product", "summary", "informational", "unknown"].indexOf(
         line.roleEvidence,
       ) < 0
     ) {

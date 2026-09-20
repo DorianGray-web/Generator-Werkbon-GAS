@@ -397,12 +397,14 @@ function buildForwardPricedAnchorCanonicalRelease_(stagedResult) {
   }, 0);
 
   if (
-    !countEvidence ||
-    parsedCount === null ||
-    parsedCount !== candidateItems.length ||
-    !structuralStatus.validation ||
-    !structuralStatus.validation.printedProductCount ||
-    structuralStatus.validation.printedProductCount.matches !== true
+    countEvidence &&
+    (
+      parsedCount === null ||
+      parsedCount !== candidateItems.length ||
+      !structuralStatus.validation ||
+      !structuralStatus.validation.printedProductCount ||
+      structuralStatus.validation.printedProductCount.matches !== true
+    )
   ) {
     addConflict("HUBO_PRODUCT_COUNT_VALIDATION_FAILED", null);
   }
@@ -417,18 +419,18 @@ function buildForwardPricedAnchorCanonicalRelease_(stagedResult) {
   }
 
   if (
-    !countEvidence ||
     !totalEvidence ||
-    countEvidence.sourceLineOrder === totalEvidence.sourceLineOrder ||
-    summaryOrders.length !== 2 ||
-    summaryOrders.indexOf(countEvidence.sourceLineOrder) < 0 ||
+    summaryOrders.length !== (countEvidence ? 2 : 1) ||
     summaryOrders.indexOf(totalEvidence.sourceLineOrder) < 0 ||
-    !observationByOrder[countEvidence.sourceLineOrder] ||
     !observationByOrder[totalEvidence.sourceLineOrder] ||
-    observationByOrder[countEvidence.sourceLineOrder].rawText !==
-      countEvidence.rawText ||
     observationByOrder[totalEvidence.sourceLineOrder].rawText !==
-      totalEvidence.rawText
+      totalEvidence.rawText ||
+    (countEvidence &&
+      (countEvidence.sourceLineOrder === totalEvidence.sourceLineOrder ||
+        summaryOrders.indexOf(countEvidence.sourceLineOrder) < 0 ||
+        !observationByOrder[countEvidence.sourceLineOrder] ||
+        observationByOrder[countEvidence.sourceLineOrder].rawText !==
+          countEvidence.rawText))
   ) {
     addConflict("INVALID_HUBO_SUMMARY_PROVENANCE", null);
   }

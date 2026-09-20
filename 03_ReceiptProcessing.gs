@@ -79,9 +79,23 @@ function processNewReceipts() {
   safeToast(ss, `Processed ${filesToProcess.length} receipt(s) for order ${bonId}`, 'Done', 8);
 }
 
-function getSelectedWerkbonId(generalSheet) {
-  const editorTestWerkbonId = cleanId(CONFIG.editorTestWerkbonId);
-  const activeCell = getActiveCellForWerkbonSheet(generalSheet);
+function getSelectedWerkbonId(generalSheet, selectorRuntime) {
+  const runtime = selectorRuntime || {};
+  const editorTestWerkbonId = cleanId(
+    Object.prototype.hasOwnProperty.call(runtime, 'editorTestWerkbonId')
+      ? runtime.editorTestWerkbonId
+      : CONFIG.editorTestWerkbonId
+  );
+  const configuredSpreadsheetId = String(
+    Object.prototype.hasOwnProperty.call(runtime, 'configuredSpreadsheetId')
+      ? runtime.configuredSpreadsheetId
+      : CONFIG.spreadsheetId || ''
+  ).trim();
+  const activeCell = getActiveCellForWerkbonSheet(
+    generalSheet,
+    runtime.getActiveSpreadsheet,
+    configuredSpreadsheetId
+  );
 
   if (activeCell) {
     const activeRow = activeCell.getRow();
@@ -116,11 +130,26 @@ function getSelectedWerkbonId(generalSheet) {
   );
 }
 
-function getActiveCellForWerkbonSheet(generalSheet) {
+function getActiveCellForWerkbonSheet(
+  generalSheet,
+  getActiveSpreadsheet,
+  configuredSpreadsheetId
+) {
   try {
-    const activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const activeSpreadsheet = typeof getActiveSpreadsheet === 'function'
+      ? getActiveSpreadsheet()
+      : SpreadsheetApp.getActiveSpreadsheet();
+    const configuredSpreadsheet = generalSheet && generalSheet.getParent
+      ? generalSheet.getParent()
+      : null;
 
-    if (activeSpreadsheet) {
+    if (
+      activeSpreadsheet &&
+      configuredSpreadsheet &&
+      configuredSpreadsheetId &&
+      activeSpreadsheet.getId() === configuredSpreadsheetId &&
+      configuredSpreadsheet.getId() === configuredSpreadsheetId
+    ) {
       const activeSheet = activeSpreadsheet.getActiveSheet();
 
       if (activeSheet && activeSheet.getName() === SHEETS.werkbonnen) {
@@ -130,14 +159,6 @@ function getActiveCellForWerkbonSheet(generalSheet) {
           return activeRange.getCell(1, 1);
         }
       }
-    }
-  } catch (e) {}
-
-  try {
-    const sheetActiveCell = generalSheet.getActiveCell();
-
-    if (sheetActiveCell) {
-      return sheetActiveCell;
     }
   } catch (e) {}
 

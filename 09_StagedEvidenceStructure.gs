@@ -23,13 +23,15 @@ function clonePrototypeIssue_(issue) {
 
 /**
  * Partitions only explicit Stage-1 role evidence. It never infers a header,
- * product, or summary role from text, indentation, or missing prices.
+ * product, summary, or informational role from text, indentation, or missing
+ * prices.
  * roleEvidence remains non-authoritative perception evidence.
  */
 function partitionObservedReceiptEvidencePrototype_(extraction) {
   const headerObservations = [];
   const productObservations = [];
   const summaryObservations = [];
+  const informationalObservations = [];
   const unclassifiedObservations = [];
   const conflicts = [];
   const observationByOrder = {};
@@ -82,7 +84,8 @@ function partitionObservedReceiptEvidencePrototype_(extraction) {
     } else if (
       line.roleEvidence !== "header" &&
       line.roleEvidence !== "product" &&
-      line.roleEvidence !== "summary"
+      line.roleEvidence !== "summary" &&
+      line.roleEvidence !== "informational"
     ) {
       conflicts.push({
         code: hasObservedTextPrototype_(line.roleEvidence)
@@ -127,6 +130,17 @@ function partitionObservedReceiptEvidencePrototype_(extraction) {
       return;
     }
 
+    if (line.roleEvidence === "informational") {
+      if (phase !== "summary") {
+        conflicts.push({
+          code: "INFORMATIONAL_OUTSIDE_TERMINAL_REGION",
+          rowOrder: line.order,
+        });
+      }
+      informationalObservations.push(line);
+      return;
+    }
+
     phase = "summary";
     summaryObservations.push(line);
   });
@@ -161,6 +175,7 @@ function partitionObservedReceiptEvidencePrototype_(extraction) {
     headerObservations: headerObservations,
     productObservations: productObservations,
     summaryObservations: summaryObservations,
+    informationalObservations: informationalObservations,
     unclassifiedObservations: unclassifiedObservations,
     summaryEvidence: summaryValidation.summaryEvidence,
     legacySummaryEvidence: legacySummaryEvidence,
@@ -168,6 +183,7 @@ function partitionObservedReceiptEvidencePrototype_(extraction) {
       headerObservations.length +
       productObservations.length +
       summaryObservations.length +
+      informationalObservations.length +
       unclassifiedObservations.length,
     conflicts: conflicts,
   };

@@ -68,8 +68,8 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "staged image integration —",
       "staged production-path diagnostic —",
     ],
-    expectedTestCount: 24,
-    expectedAssertionCount: 24,
+    expectedTestCount: 28,
+    expectedAssertionCount: 28,
   },
   {
     batchName: "staged-stage1-diagnostics",
@@ -222,9 +222,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 147 ||
-    new Set(names).size !== 147 ||
-    expectedAssertionTotal !== 733 ||
+    registrations.length !== 151 ||
+    new Set(names).size !== 151 ||
+    expectedAssertionTotal !== 737 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -581,7 +581,7 @@ function doGet(options) {
     },
   );
 
-  QUnit.module("legacy-production"); // 47 tests / 115 assertions
+  QUnit.module("legacy-production"); // 51 tests / 119 assertions
 
   // ==================================================
   // CONFIG HELPERS
@@ -624,6 +624,160 @@ function doGet(options) {
   QUnit.test("CONFIG — exposes editorTestWerkbonId", function (assert) {
     assert.ok("editorTestWerkbonId" in CONFIG);
   });
+
+  function createWerkbonSelectorFixture_(options) {
+    const configuredSpreadsheetId = "configured-spreadsheet";
+    const activeCell = {
+      getRow: function () { return options.activeRow; },
+      getValue: function () { return options.activeCellValue || ""; },
+    };
+    const activeSheet = {
+      getName: function () { return options.activeSheetName; },
+      getActiveRange: function () {
+        return {
+          getCell: function () { return activeCell; },
+        };
+      },
+    };
+    const activeSpreadsheet = options.hasActiveSpreadsheet === false
+      ? null
+      : {
+          getId: function () { return options.activeSpreadsheetId; },
+          getActiveSheet: function () { return activeSheet; },
+        };
+    const configuredSpreadsheet = {
+      getId: function () { return configuredSpreadsheetId; },
+    };
+    let staleCellReadCount = 0;
+    const generalSheet = {
+      getParent: function () { return configuredSpreadsheet; },
+      getRange: function (row, column) {
+        return {
+          getValue: function () {
+            return column === 1 && row === options.activeRow
+              ? options.columnAValue
+              : "";
+          },
+        };
+      },
+      getActiveCell: function () {
+        staleCellReadCount += 1;
+        return {
+          getRow: function () { return options.staleRow || 18; },
+          getValue: function () {
+            return options.staleValue || "ENG-20260814-018";
+          },
+        };
+      },
+    };
+
+    return {
+      generalSheet: generalSheet,
+      runtime: {
+        editorTestWerkbonId: options.editorTestWerkbonId || "",
+        configuredSpreadsheetId: configuredSpreadsheetId,
+        getActiveSpreadsheet: function () { return activeSpreadsheet; },
+      },
+      getStaleCellReadCount: function () { return staleCellReadCount; },
+      configuredSpreadsheetId: configuredSpreadsheetId,
+    };
+  }
+
+  QUnit.test(
+    "getSelectedWerkbonId — uses active row from configured spreadsheet",
+    function (assert) {
+      const fixture = createWerkbonSelectorFixture_({
+        activeSpreadsheetId: "configured-spreadsheet",
+        activeSheetName: SHEETS.werkbonnen,
+        activeRow: 19,
+        columnAValue: "ENG-20260814-019",
+        editorTestWerkbonId: "ENG-20260814-018",
+      });
+
+      assert.ok(
+        getSelectedWerkbonId(fixture.generalSheet, fixture.runtime) ===
+          "ENG-20260814-019" &&
+          fixture.getStaleCellReadCount() === 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "getSelectedWerkbonId — rejects stale sheet cell without UI context",
+    function (assert) {
+      const fixture = createWerkbonSelectorFixture_({
+        hasActiveSpreadsheet: false,
+        activeRow: 19,
+        columnAValue: "ENG-20260814-019",
+        staleRow: 18,
+        staleValue: "ENG-20260814-018",
+        editorTestWerkbonId: "",
+      });
+      let selected = null;
+      let error = null;
+
+      try {
+        selected = getSelectedWerkbonId(fixture.generalSheet, fixture.runtime);
+      } catch (caught) {
+        error = caught;
+      }
+
+      assert.ok(
+        selected === null &&
+          error &&
+          error.message.indexOf("No active Werkbon row is available") >= 0 &&
+          fixture.getStaleCellReadCount() === 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "getSelectedWerkbonId — uses explicit editor fallback without UI context",
+    function (assert) {
+      const fixture = createWerkbonSelectorFixture_({
+        hasActiveSpreadsheet: false,
+        activeRow: 19,
+        columnAValue: "ENG-20260814-019",
+        staleRow: 18,
+        staleValue: "ENG-20260814-018",
+        editorTestWerkbonId: "ENG-20260814-018",
+      });
+
+      assert.ok(
+        getSelectedWerkbonId(fixture.generalSheet, fixture.runtime) ===
+          "ENG-20260814-018" &&
+          fixture.getStaleCellReadCount() === 0,
+      );
+    },
+  );
+
+  QUnit.test(
+    "getSelectedWerkbonId — rejects active row from another spreadsheet",
+    function (assert) {
+      const fixture = createWerkbonSelectorFixture_({
+        activeSpreadsheetId: "other-spreadsheet",
+        activeSheetName: SHEETS.werkbonnen,
+        activeRow: 19,
+        columnAValue: "ENG-20260814-019",
+        editorTestWerkbonId: "",
+      });
+      let selected = null;
+      let error = null;
+
+      try {
+        selected = getSelectedWerkbonId(fixture.generalSheet, fixture.runtime);
+      } catch (caught) {
+        error = caught;
+      }
+
+      assert.ok(
+        selected === null &&
+          error &&
+          error.message.indexOf("No active Werkbon row is available") >= 0 &&
+          fixture.getStaleCellReadCount() === 0,
+      );
+    },
+  );
 
   QUnit.test(
     "safeToast — swallows toast exceptions from editor context",
@@ -5017,6 +5171,392 @@ function doGet(options) {
           additionalCostCount: 0,
           vat: null,
           totals: null,
+        },
+      ));
+    },
+  );
+
+  QUnit.test(
+    "staged image integration — absent product count preserves two-item quantities",
+    function (assert) {
+      const evidence = {
+        observedLines: [
+          {
+            order: 1,
+            rawText: "2 Synthetic bracket 5,19 10,38",
+            leadingQuantityText: "2",
+            descriptionText: "Synthetic bracket",
+            unitPriceText: "5,19",
+            lineTotalText: "10,38",
+            indentation: "left_aligned",
+            roleEvidence: "product",
+          },
+          {
+            order: 2,
+            rawText: "1 Synthetic fastener 5,79 5,79",
+            leadingQuantityText: "1",
+            descriptionText: "Synthetic fastener",
+            unitPriceText: "5,79",
+            lineTotalText: "5,79",
+            indentation: "left_aligned",
+            roleEvidence: "product",
+          },
+          {
+            order: 3,
+            rawText: "Totaal 16,17",
+            leadingQuantityText: null,
+            descriptionText: "Totaal",
+            unitPriceText: null,
+            lineTotalText: "16,17",
+            indentation: "left_aligned",
+            roleEvidence: "summary",
+          },
+        ],
+        summaryEvidence: {
+          printedProductCount: null,
+          printedTotal: {
+            sourceLineOrder: 3,
+            rawText: "Totaal 16,17",
+            labelText: "Totaal",
+            valueText: "16,17",
+            totalTypeEvidence: null,
+          },
+        },
+      };
+      let canonical = null;
+      let errorCode = null;
+
+      try {
+        canonical = buildStagedCanonicalReceiptOrThrow_(evidence);
+      } catch (error) {
+        errorCode = error && error.code ? error.code : "UNCLASSIFIED_ERROR";
+      }
+
+      assert.ok(compactJsonEquality(
+        {
+          errorCode: errorCode,
+          itemCount: canonical ? canonical.items.length : null,
+          quantities: canonical
+            ? canonical.items.map(function (item) {
+                return item.quantity;
+              })
+            : null,
+          lineTotals: canonical
+            ? canonical.items.map(function (item) {
+                return item.lineTotal;
+              })
+            : null,
+          total: canonical
+            ? canonical.items.reduce(function (sum, item) {
+                return sum + Math.round(item.lineTotal * 100);
+              }, 0) / 100
+            : null,
+        },
+        {
+          errorCode: null,
+          itemCount: 2,
+          quantities: [2, 1],
+          lineTotals: [10.38, 5.79],
+          total: 16.17,
+        },
+      ));
+    },
+  );
+
+  QUnit.test(
+    "staged image integration — terminal informational rows preserve multi-item release",
+    function (assert) {
+      const evidence = observedPrototypeExtraction(
+        [
+          observedPrototypeRow(
+            1,
+            "Synthetic bracket",
+            "2",
+            "5,19",
+            "10,38",
+            "left_aligned",
+          ),
+          observedPrototypeRow(
+            2,
+            "Synthetic fastener",
+            "1",
+            "5,79",
+            "5,79",
+            "left_aligned",
+          ),
+          observedPrototypeEvidenceLine(3, "TOTAAL 16,17", "summary"),
+          observedPrototypeEvidenceLine(
+            4,
+            "Synthetic settlement context 16,17",
+            "informational",
+          ),
+          observedPrototypeEvidenceLine(
+            5,
+            "Synthetic change 0,00",
+            "informational",
+          ),
+          observedPrototypeEvidenceLine(
+            6,
+            "Synthetic VAT breakdown 13,36 2,81",
+            "informational",
+          ),
+          observedPrototypeEvidenceLine(
+            7,
+            "Synthetic total VAT 13,36 2,81 16,17",
+            "informational",
+          ),
+        ],
+        {
+          printedProductCount: null,
+          printedTotal: {
+            sourceLineOrder: 3,
+            rawText: "TOTAAL 16,17",
+            labelText: "TOTAAL",
+            valueText: "16,17",
+            totalTypeEvidence: null,
+          },
+        },
+      );
+      const snapshot = JSON.stringify(evidence);
+      const candidate = buildStagedReceiptCandidate(evidence);
+      let canonical = null;
+      let errorCode = null;
+
+      try {
+        canonical = buildStagedCanonicalReceiptOrThrow_(evidence);
+      } catch (error) {
+        errorCode = error && error.code ? error.code : "UNCLASSIFIED_ERROR";
+      }
+
+      assert.ok(compactJsonEquality(
+        {
+          errorCode: errorCode,
+          itemCount: canonical ? canonical.items.length : null,
+          quantities: canonical
+            ? canonical.items.map(function (item) {
+                return item.quantity;
+              })
+            : null,
+          lineTotals: canonical
+            ? canonical.items.map(function (item) {
+                return item.lineTotal;
+              })
+            : null,
+          itemSum: canonical
+            ? canonical.items.reduce(function (sum, item) {
+                return sum + Math.round(item.lineTotal * 100);
+              }, 0) / 100
+            : null,
+          structuralResolved: candidate.structuralStatus.resolved,
+          conflictCodes: candidate.structuralStatus.conflicts.map(function (
+            conflict,
+          ) {
+            return conflict.code;
+          }),
+          informationalRows:
+            candidate.evidenceTrace.originalObservations
+              .filter(function (line) {
+                return line.roleEvidence === "informational";
+              })
+              .map(function (line) {
+                return line.rawText;
+              }),
+          sourceUnchanged: JSON.stringify(evidence) === snapshot,
+        },
+        {
+          errorCode: null,
+          itemCount: 2,
+          quantities: [2, 1],
+          lineTotals: [10.38, 5.79],
+          itemSum: 16.17,
+          structuralResolved: true,
+          conflictCodes: [],
+          informationalRows: [
+            "Synthetic settlement context 16,17",
+            "Synthetic change 0,00",
+            "Synthetic VAT breakdown 13,36 2,81",
+            "Synthetic total VAT 13,36 2,81 16,17",
+          ],
+          sourceUnchanged: true,
+        },
+      ));
+    },
+  );
+
+  QUnit.test(
+    "staged image integration — terminal informational rows preserve single-item release",
+    function (assert) {
+      const evidence = observedPrototypeExtraction(
+        [
+          observedPrototypeRow(
+            1,
+            "Synthetic fitting",
+            "1",
+            "18,99",
+            "18,99",
+            "left_aligned",
+          ),
+          observedPrototypeEvidenceLine(2, "TOTAAL 18,99", "summary"),
+          observedPrototypeEvidenceLine(
+            3,
+            "Synthetic tender context 18,99",
+            "informational",
+          ),
+          observedPrototypeEvidenceLine(
+            4,
+            "Synthetic change 0,00",
+            "informational",
+          ),
+          observedPrototypeEvidenceLine(
+            5,
+            "Synthetic VAT rate 21% base 15,69 amount 3,30",
+            "informational",
+          ),
+          observedPrototypeEvidenceLine(
+            6,
+            "Synthetic VAT total base 15,69 amount 3,30 total 18,99",
+            "informational",
+          ),
+        ],
+        {
+          printedProductCount: null,
+          printedTotal: {
+            sourceLineOrder: 2,
+            rawText: "TOTAAL 18,99",
+            labelText: "TOTAAL",
+            valueText: "18,99",
+            totalTypeEvidence: null,
+          },
+        },
+      );
+      const snapshot = JSON.stringify(evidence);
+      const candidate = buildStagedReceiptCandidate(evidence);
+      let canonical = null;
+      let errorCode = null;
+
+      try {
+        canonical = buildStagedCanonicalReceiptOrThrow_(evidence);
+      } catch (error) {
+        errorCode = error && error.code ? error.code : "UNCLASSIFIED_ERROR";
+      }
+
+      assert.ok(compactJsonEquality(
+        {
+          errorCode: errorCode,
+          itemCount: canonical ? canonical.items.length : null,
+          quantity: canonical ? canonical.items[0].quantity : null,
+          lineTotal: canonical ? canonical.items[0].lineTotal : null,
+          itemSum: canonical
+            ? canonical.items.reduce(function (sum, item) {
+                return sum + Math.round(item.lineTotal * 100);
+              }, 0) / 100
+            : null,
+          structuralResolved: candidate.structuralStatus.resolved,
+          conflictCodes: candidate.structuralStatus.conflicts.map(function (
+            conflict,
+          ) {
+            return conflict.code;
+          }),
+          informationalRows:
+            candidate.evidenceTrace.originalObservations
+              .filter(function (line) {
+                return line.roleEvidence === "informational";
+              })
+              .map(function (line) {
+                return line.rawText;
+              }),
+          sourceUnchanged: JSON.stringify(evidence) === snapshot,
+        },
+        {
+          errorCode: null,
+          itemCount: 1,
+          quantity: 1,
+          lineTotal: 18.99,
+          itemSum: 18.99,
+          structuralResolved: true,
+          conflictCodes: [],
+          informationalRows: [
+            "Synthetic tender context 18,99",
+            "Synthetic change 0,00",
+            "Synthetic VAT rate 21% base 15,69 amount 3,30",
+            "Synthetic VAT total base 15,69 amount 3,30 total 18,99",
+          ],
+          sourceUnchanged: true,
+        },
+      ));
+    },
+  );
+
+  QUnit.test(
+    "staged image integration — unknown product-like row and nonterminal informational row fail closed",
+    function (assert) {
+      const unknownEvidence = observedPrototypeExtraction(
+        [
+          observedPrototypeRow(
+            1,
+            "Synthetic anchor",
+            "1",
+            "2,00",
+            "2,00",
+            "left_aligned",
+          ),
+          observedPrototypeEvidenceLine(
+            2,
+            "Unresolved possible product row",
+            "unknown",
+          ),
+          observedPrototypeEvidenceLine(3, "TOTAAL 2,00", "summary"),
+        ],
+        {
+          printedProductCount: null,
+          printedTotal: {
+            sourceLineOrder: 3,
+            rawText: "TOTAAL 2,00",
+            labelText: "TOTAAL",
+            valueText: "2,00",
+            totalTypeEvidence: null,
+          },
+        },
+      );
+      const nonterminalEvidence = JSON.parse(JSON.stringify(unknownEvidence));
+      nonterminalEvidence.observedLines[1].roleEvidence = "informational";
+      let unknownCanonical = null;
+      let unknownError = null;
+      let nonterminalCanonical = null;
+      let nonterminalError = null;
+
+      try {
+        unknownCanonical = buildStagedCanonicalReceiptOrThrow_(unknownEvidence);
+      } catch (error) {
+        unknownError = error;
+      }
+      try {
+        nonterminalCanonical =
+          buildStagedCanonicalReceiptOrThrow_(nonterminalEvidence);
+      } catch (error) {
+        nonterminalError = error;
+      }
+
+      assert.ok(compactJsonEquality(
+        {
+          unknownCanonical: unknownCanonical,
+          unknownName: unknownError && unknownError.name,
+          unknownStage: unknownError && unknownError.stage,
+          unknownCode: unknownError && unknownError.code,
+          nonterminalCanonical: nonterminalCanonical,
+          nonterminalName: nonterminalError && nonterminalError.name,
+          nonterminalStage: nonterminalError && nonterminalError.stage,
+          nonterminalCode: nonterminalError && nonterminalError.code,
+        },
+        {
+          unknownCanonical: null,
+          unknownName: "StagedImageExtractionError",
+          unknownStage: "structure",
+          unknownCode: "UNKNOWN_OBSERVATION_ROLE",
+          nonterminalCanonical: null,
+          nonterminalName: "StagedImageExtractionError",
+          nonterminalStage: "structure",
+          nonterminalCode: "INFORMATIONAL_OUTSIDE_TERMINAL_REGION",
         },
       ));
     },
@@ -9692,8 +10232,19 @@ function doGet(options) {
       );
       assert.notOk("detail" in imagePart.image_url);
       assert.ok(prompt.indexOf("Do not create canonical products") >= 0);
-      assert.ok(prompt.indexOf('use roleEvidence "unknown"') >= 0);
-      assert.ok(prompt.indexOf('totalTypeEvidence must be null') >= 0);
+      assert.ok(compactJsonEquality(
+        payload.response_format.json_schema.schema.properties.observedLines
+          .items.properties.roleEvidence.enum,
+        ["header", "product", "summary", "informational", "unknown"],
+      ));
+      assert.ok(
+        prompt.indexOf('roleEvidence "informational"') >= 0 &&
+          prompt.indexOf("payment or tender lines") >= 0 &&
+          prompt.indexOf("VAT breakdown lines") >= 0 &&
+          prompt.indexOf("potentially product-like row") >= 0 &&
+          prompt.indexOf('roleEvidence "unknown"') >= 0 &&
+          prompt.indexOf("totalTypeEvidence must be null") >= 0,
+      );
     },
   );
 
@@ -9722,6 +10273,16 @@ function doGet(options) {
             indentation: "left_aligned",
             roleEvidence: "summary",
           },
+          {
+            order: 3,
+            rawText: "Synthetic tender 12,34",
+            leadingQuantityText: null,
+            descriptionText: "Synthetic tender",
+            unitPriceText: null,
+            lineTotalText: "12,34",
+            indentation: "left_aligned",
+            roleEvidence: "informational",
+          },
         ],
         summaryEvidence: {
           printedProductCount: null,
@@ -9738,7 +10299,10 @@ function doGet(options) {
       const parsed = parseOpenAIStage1V2DiagnosticResponse_(response);
 
       assert.ok(compactJsonEquality(parsed, evidence));
-      assert.equal(parsed.observedLines[1].rawText, "Total 12,34");
+      assert.ok(
+        parsed.observedLines[2].rawText === "Synthetic tender 12,34" &&
+          parsed.observedLines[2].roleEvidence === "informational",
+      );
       assert.equal(
         parsed.summaryEvidence.printedTotal.totalTypeEvidence,
         null,
