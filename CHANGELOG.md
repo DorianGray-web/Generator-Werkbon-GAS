@@ -15,6 +15,22 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.9.1] - 2026-09-20
+
+### Fixed
+
+- Receipt validation no longer rejects otherwise valid receipts solely because `printedProductCount` evidence is absent; present counts remain strictly parsed, matched, and provenance-validated.
+- Terminal non-product receipt observations can be preserved as `informational` evidence without contributing product, canonical, VAT, or reconciliation values; premature informational rows and unknown roles continue to fail closed.
+- Werkbon selection now requires a trusted active row from the configured spreadsheet or an explicit `EDITOR_TEST_WERKBON_ID`, preventing fallback to stale sheet cursor state in standalone/editor execution.
+
+### Validation
+
+- Validated two observed Hubo cases: a €18.99 receipt produced one Materials row, and a €16.17 receipt produced two Materials rows.
+- Confirmed the isolated GAS gates with zero failures: `legacy-production` (51 tests / 119 assertions), `staged-image-integration` (28 / 28), `staged-prototype-candidate` (31 / 232), and `staged-stage1-diagnostics` (25 / 128).
+- Confirmed the permanent staged partition gate passes.
+
+---
+
 ## [1.9.0] - 2026-09-13
 
 ### Added
