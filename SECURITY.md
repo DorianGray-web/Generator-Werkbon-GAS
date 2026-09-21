@@ -6,8 +6,10 @@ This project is currently maintained as an open-source portfolio and automation 
 
 | Version | Supported |
 |---------|-----------|
-| 1.8.x   | ✅ Yes |
-| < 1.8   | ❌ No |
+| 1.9.1   | ✅ Yes |
+| < 1.9.1 | ❌ No |
+
+v1.10.0 is in development and is not a released version.
 
 ---
 
@@ -42,15 +44,20 @@ This project must never contain:
 
 All sensitive values should be stored using **Google Apps Script Script Properties**.
 
-Required Script Properties:
+The normal production configuration contains exactly these Script Properties:
 
 ```text
-OPENAI_API_KEY
-OPENAI_RECEIPTS_FOLDER_ID
 SPREADSHEET_ID
 TEMPLATE_DOC_ID
 PDF_OUTPUT_FOLDER_ID
+OPENAI_RECEIPTS_FOLDER_ID
+OPENAI_API_KEY
+STAGED_IMAGE_EXTRACTION_ENABLED
 ```
+
+`OPENAI_API_KEY` is a secret. Never copy it into source, documentation, logs, screenshots, or exported configuration. Revoke and rotate it immediately if exposed.
+
+Diagnostic and test-only properties such as `EDITOR_TEST_WERKBON_ID`, `DEBUG_OPENAI_RESPONSE_LOGGING`, image-adapter fixture IDs, and staged-image diagnostic file IDs are not part of normal production configuration. Raw-response logging may contain sensitive receipt or invoice content and must be limited to an explicitly bounded diagnostic.
 
 ---
 

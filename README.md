@@ -8,12 +8,15 @@
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
 ![Release](https://img.shields.io/badge/Release-v1.9.1-blue)
+![Development](https://img.shields.io/badge/v1.10.0-IN%20DEVELOPMENT-orange)
 
 ---
 
 ## 📖 Overview
 
 Generator-Werkbon-GAS is a modular Google Apps Script project designed to automate the creation of maintenance work orders (`Werkbon`).
+
+The current released version is **v1.9.1**. The container-bound runtime migration for **v1.10.0 is IN DEVELOPMENT** and has not been released.
 
 The system uses OpenAI GPT-4o to process construction receipt images and PDF invoices, extract purchased materials, store them in Google Sheets, and generate a ready-to-print archival PDF package containing the work order and its receipt evidence.
 
@@ -107,6 +110,25 @@ Persist One Archival PDF
 
 ---
 
+## 🧭 Canonical Runtime Model
+
+The canonical production execution model for v1.10.0 development is:
+
+```text
+Google Spreadsheet
+        → container-bound Apps Script
+        → onOpen()
+        → custom menu
+        → active Werkbonnen row
+        → workflow
+```
+
+Production source is deployed to an Apps Script project that is bound to the target Google Spreadsheet. A generic standalone Apps Script project is not the canonical production setup, and normal production actions are launched from the Spreadsheet custom menu.
+
+An Apps Script editor run has a different execution context: an active Spreadsheet, sheet, or range is not guaranteed. `EDITOR_TEST_WERKBON_ID` exists only for explicit editor/test execution and must remain absent from normal production configuration. Without a trusted active row or an explicit editor/test identifier, Werkbon selection fails closed instead of falling back to stale cursor state.
+
+---
+
 ## 🛠 Technologies
 
 - Google Apps Script
@@ -168,38 +190,47 @@ Store sensitive and environment-specific information using:
 
 **Google Apps Script → Project Settings → Script Properties**
 
-Configuration properties:
+Normal production configuration contains exactly these properties:
 
 | Property | Description |
 |---|---|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `OPENAI_RECEIPTS_FOLDER_ID` | Google Drive folder containing new receipts |
-| `SPREADSHEET_ID` | Google Spreadsheet ID |
+| `SPREADSHEET_ID` | Parent bound Google Spreadsheet ID; it must match the Spreadsheet that owns the Apps Script project |
 | `TEMPLATE_DOC_ID` | Google Docs template ID |
 | `PDF_OUTPUT_FOLDER_ID` | Output folder for generated PDF files |
-| `DEBUG_OPENAI_RESPONSE_LOGGING` | Optional: set to `true` to log raw AI output |
-| `EDITOR_TEST_WERKBON_ID` | Optional: fallback Werkbon ID for editor/test runs; not required for production menu use |
+| `OPENAI_RECEIPTS_FOLDER_ID` | Google Drive folder containing new receipts |
+| `OPENAI_API_KEY` | Secret OpenAI API key; never store it in source or the repository, and rotate it immediately if exposed |
+| `STAGED_IMAGE_EXTRACTION_ENABLED` | Production feature flag; the accepted runtime value is `true`, configured through Script Properties rather than hardcoded in source |
 
 Missing required configuration values are validated at runtime and produce a descriptive error message.
+
+The following properties are diagnostic or test-only and are **not** part of normal production configuration:
+
+```text
+EDITOR_TEST_WERKBON_ID
+DEBUG_OPENAI_RESPONSE_LOGGING
+IMAGE_PDF_ADAPTER_JPEG_FILE_ID
+IMAGE_PDF_ADAPTER_PNG_FILE_ID
+STAGED_IMAGE_PRODUCTION_DIAGNOSTIC_FILE_ID
+STAGE1_V3_DIAGNOSTIC_FILE_ID
+```
 
 ---
 
 ## 🚀 Installation
 
 1. Clone or download this repository.
-2. Create a new Google Apps Script project or open the script bound to your test Google Sheet.
-3. Copy all `.gs` files and `appsscript.json` into the Apps Script project.
-4. Configure the required Script Properties.
-5. Enable the required Google services:
-   - Google Drive API
-   - Google Docs API
-   - Advanced Google Drive Service
-6. Reload the Google Sheet.
-7. Open the **Generator Werkbon** custom menu.
-8. Run one of the available actions:
-   - `runFullWorkflow()`
-   - `processNewReceipts()`
-   - `generateWerkbon()`
+2. Create or open the target Google Spreadsheet.
+3. In that Spreadsheet, open **Extensions → Apps Script**.
+4. Verify that the Apps Script project is container-bound to the intended Spreadsheet.
+5. Verify both the Apps Script Script ID and the parent Spreadsheet identity.
+6. Configure a local or staging clasp configuration for that verified Script ID. The tracked `.clasp.example.json` is only a secret-free template; a real `.clasp.json` is environment-specific and is not portable production configuration.
+7. Inspect clasp's `filesToPush` before synchronization and confirm that only the intended repository source and manifest are selected.
+8. Synchronize repository source only after the target identities and file list are verified.
+9. Configure the approved production Script Properties listed above.
+10. Reload the Spreadsheet and validate that `onOpen()` creates the expected custom menu.
+11. Select the intended row on the `Werkbonnen` sheet and validate the active-row workflow from that menu.
+
+> **Warning:** Never blindly reuse another environment's `.clasp.json`. A wrong Script ID can overwrite an unrelated Apps Script project.
 
 ---
 
@@ -213,7 +244,7 @@ Before connecting or testing this version:
 2. Go to **Extensions → Apps Script**.
 3. Verify which bound project belongs to the copied sheet.
 4. Remove obsolete copied script code or old bound project copies from the test environment.
-5. Ensure that only the intended v1.9.0 release-target implementation is used.
+5. Ensure that only the intended source baseline is used. The current release is v1.9.1; v1.10.0 remains IN DEVELOPMENT.
 6. Reconfigure Script Properties in the copied project because they may not be transferred automatically.
 
 > Do not delete the production Apps Script project connected to the original working spreadsheet.
@@ -236,7 +267,7 @@ All secrets and environment-specific resource identifiers are stored using Googl
 
 If any identifier was previously committed to a public repository, access permissions should be reviewed and the affected resource should be replaced where necessary.
 
-Raw OpenAI responses are not logged by default. Debug logging must be enabled explicitly through:
+Raw OpenAI responses are not logged by default. `DEBUG_OPENAI_RESPONSE_LOGGING` is a diagnostic-only property, is not part of normal production configuration, and may expose sensitive receipt or invoice content. Enable it only for a bounded diagnostic and remove it afterward.
 
 ```text
 DEBUG_OPENAI_RESPONSE_LOGGING=true
@@ -338,13 +369,17 @@ Multiple-file processing is supported by the common processing loop, while multi
 
 ### v1.9.0 archival PDF package validation
 
-v1.9.0 is the current release target. The archival package places the Werkbon pages first, then includes each unique recognized evidence source according to the first occurrence of its `receiptKey` in persisted Materials rows. Existing PDFs are retained as PDFs; JPEG and PNG evidence is converted through Google Docs to a one-page PDF before the ordered merge. The completed package is persisted once only after its actual page count matches the expected total.
+v1.9.0 introduced the archival package that places the Werkbon pages first, then includes each unique recognized evidence source according to the first occurrence of its `receiptKey` in persisted Materials rows. Existing PDFs are retained as PDFs; JPEG and PNG evidence is converted through Google Docs to a one-page PDF before the ordered merge. The completed package is persisted once only after its actual page count matches the expected total.
 
 The accepted real workflow produced a six-page package: two Werkbon pages, followed by PDF, converted JPEG, PDF, and converted JPEG evidence in persisted first-seen order. The package contained the expected six pages, the final PDF was persisted, and temporary Google Docs resources were cleaned up.
 
 Image conversion supports images without EXIF orientation metadata and the bounded observed identity-orientation cases. EXIF orientations 2–8 and malformed or unresolved EXIF fail closed. Small setter-induced dimension changes are diagnostic only; exact aspect-ratio equality is not guaranteed.
 
 The staged receipt extraction path may intermittently report `structure:INVALID_SUMMARY_SOURCE_LINE`. This known issue remains outside the archival PDF packaging scope and did not block the accepted Phase D workflow.
+
+### v1.10.0 container-bound runtime development validation
+
+v1.10.0 is **IN DEVELOPMENT**, not released. Bounded runtime validation in the container-bound project has confirmed `onOpen()` and custom-menu startup, active-row selection, the full workflow, new receipt extraction through OpenAI, and archival PDF packaging including temporary-document cleanup. This is evidence for the accepted runtime path only; it is not a claim of universal receipt or merchant compatibility.
 
 ---
 
@@ -371,7 +406,7 @@ v1.8.0 test suite, confirmed in the isolated test GAS environment:
 - 115 passed
 - 0 failed
 
-v1.9.0 release-target archival packaging gates, confirmed in the isolated test GAS environment:
+v1.9.0 archival packaging gates, confirmed in the isolated test GAS environment:
 
 - image-pdf-adapter: 17 tests, 50 assertions, 50 passed, 0 failed
 - pdf-package-builder: 17 tests, 39 assertions, 39 passed, 0 failed
