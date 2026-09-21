@@ -4,8 +4,11 @@ This file governs automated work in this repository. Keep changes narrow, eviden
 
 ## Repository boundaries
 
-- `00_Config.gs` through `10_StagedFinancialEvidence.gs` are production/shared Google Apps Script modules; the staged production/shared core spans `08_StagedReceiptExtraction.gs` through `10_StagedFinancialEvidence.gs`.
-- `11_StagedStructuralExperiments.gs` through `14_FinancialInterpretationReleaseExperiments.gs` are experimental/research Google Apps Script modules.
+- `00_Config.gs` through `07_DataHelpers.gs` are core/runtime Google Apps Script modules, excluding the separately named Stage1V3 experimental modules.
+- `08_StagedReceiptExtraction.gs` through `10_StagedFinancialEvidence.gs` are the staged production extraction/validation core.
+- `04_Stage1V3PhysicalEvidence.gs`, `04_Stage1V3ObservedLinesProjection.gs`, `11_StagedStructuralExperiments.gs` through `15_SourceTopologyEvidenceExperiments.gs`, and `18_DocImageToPdfCompatibilityExperiment.gs` through `19_DocImageToPdfMeasurementExperiment.gs` are experimental/research modules.
+- `16_PdfLibV1_17_1Vendor.gs` is vendored third-party source.
+- `17_PdfBlobMerge.gs`, `20_ImageToPdfAdapter.gs`, and `21_PdfPackageBuilder.gs` are production PDF-packaging modules.
 - `tests.gs` is the QUnitGS2 test suite that runs in Google Apps Script.
 - `appsscript.json` is the version-controlled Apps Script manifest.
 - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, and `SECURITY.md` are project documentation.
@@ -81,4 +84,4 @@ Before declaring an edit complete, agents MUST:
 2. Run `git diff --check` and report the result.
 3. Run the relevant QUnitGS2 tests when executable in the available Apps Script environment, and report the actual result or state clearly that they were not run.
 
-For release-sensitive or financial/business-logic changes, the full QUnitGS2 suite is a validation gate. Agents MUST NOT claim test, E2E, deployment, or release success without current evidence. Historical screenshots, test counts, deployments, and releases are context only, never permanent proof of the current state.
+For release-sensitive or financial/business-logic changes, full QUnitGS2 validation means the authoritative independent batch set plus its permanent-partition gate, with each batch run in its own lifecycle; it does not mean one monolithic QUnitGS2 run. Agents MUST NOT claim test, E2E, deployment, or release success without current evidence. Historical screenshots, test counts, deployments, and releases are context only, never permanent proof of the current state.
