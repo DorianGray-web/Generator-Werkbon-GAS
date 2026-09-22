@@ -6,10 +6,8 @@ This project is currently maintained as an open-source portfolio and automation 
 
 | Version | Supported |
 |---------|-----------|
-| 1.9.1   | ✅ Yes |
-| < 1.9.1 | ❌ No |
-
-v1.10.0 is in development and is not a released version.
+| 1.10.0   | ✅ Yes |
+| < 1.10.0 | ❌ No |
 
 ---
 

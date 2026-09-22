@@ -15,6 +15,22 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.10.0] - 2026-09-22
+
+### Changed
+
+- Moved canonical production execution to a container-bound Apps Script project attached to the target Spreadsheet. Operators launch the workflow from its custom menu with a trusted active `Werkbonnen` row; selector identity continues to fail closed.
+- Documented the exact six-property production Script Properties set as deployment configuration, including the `SPREADSHEET_ID` match to the parent Spreadsheet.
+- Documented verification of the target Script ID and parent Spreadsheet identity before clasp synchronization.
+
+### Validation
+
+- Bounded runtime acceptance in the container-bound project covered `onOpen()` and menu startup, active-row selection, the full workflow, receipt discovery and OpenAI extraction, Uren and Materials population, Werkbon generation, archival PDF packaging, page-count reconciliation, and temporary-document cleanup.
+- One bounded Hubo case produced four Materials rows with a normalized total of €36.96.
+- No production receipt, financial, or PDF algorithm was redesigned for this runtime migration.
+
+---
+
 ## [1.9.1] - 2026-09-20
 
 ### Fixed
