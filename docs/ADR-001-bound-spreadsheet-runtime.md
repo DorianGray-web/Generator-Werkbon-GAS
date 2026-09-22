@@ -1,6 +1,6 @@
 # ADR-001: Container-bound Spreadsheet Runtime
 
-- **Status:** Accepted for v1.10.0 development
+- **Status:** Accepted
 - **Scope:** Production execution context and deployment identity
 
 ## Context
@@ -25,7 +25,7 @@ Editor execution remains a separate test-only context. It must not substitute st
 
 ## Evidence
 
-Bounded v1.10.0 development validation confirmed:
+Bounded v1.10.0 runtime validation confirmed:
 
 - `onOpen()` and custom-menu startup;
 - active-row workflow selection;
@@ -33,4 +33,4 @@ Bounded v1.10.0 development validation confirmed:
 - new receipt extraction through OpenAI; and
 - archival PDF packaging, including evidence association, page-count reconciliation, and temporary-document cleanup.
 
-This evidence accepts the container-bound runtime path for v1.10.0 development. It does not mark v1.10.0 as released or establish universal receipt or merchant compatibility.
+This evidence supports the container-bound runtime path for v1.10.0. It does not establish universal receipt or merchant compatibility.

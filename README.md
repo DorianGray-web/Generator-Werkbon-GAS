@@ -7,8 +7,7 @@
 ![Architecture](https://img.shields.io/badge/Architecture-Modular-blueviolet)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
-![Release](https://img.shields.io/badge/Release-v1.9.1-blue)
-![Development](https://img.shields.io/badge/v1.10.0-IN%20DEVELOPMENT-orange)
+![Release](https://img.shields.io/badge/Release-v1.10.0-blue)
 
 ---
 
@@ -16,7 +15,7 @@
 
 Generator-Werkbon-GAS is a modular Google Apps Script project designed to automate the creation of maintenance work orders (`Werkbon`).
 
-The current released version is **v1.9.1**. The container-bound runtime migration for **v1.10.0 is IN DEVELOPMENT** and has not been released.
+The current released version is **v1.10.0**, with production execution in a container-bound Spreadsheet Apps Script project.
 
 The system uses OpenAI GPT-4o to process construction receipt images and PDF invoices, extract purchased materials, store them in Google Sheets, and generate a ready-to-print archival PDF package containing the work order and its receipt evidence.
 
@@ -112,7 +111,7 @@ Persist One Archival PDF
 
 ## 🧭 Canonical Runtime Model
 
-The canonical production execution model for v1.10.0 development is:
+The canonical production execution model for v1.10.0 is:
 
 ```text
 Google Spreadsheet
@@ -244,7 +243,7 @@ Before connecting or testing this version:
 2. Go to **Extensions → Apps Script**.
 3. Verify which bound project belongs to the copied sheet.
 4. Remove obsolete copied script code or old bound project copies from the test environment.
-5. Ensure that only the intended source baseline is used. The current release is v1.9.1; v1.10.0 remains IN DEVELOPMENT.
+5. Ensure that only the intended source baseline is used. The current release is v1.10.0.
 6. Reconfigure Script Properties in the copied project because they may not be transferred automatically.
 
 > Do not delete the production Apps Script project connected to the original working spreadsheet.
@@ -377,9 +376,9 @@ Image conversion supports images without EXIF orientation metadata and the bound
 
 The staged receipt extraction path may intermittently report `structure:INVALID_SUMMARY_SOURCE_LINE`. This known issue remains outside the archival PDF packaging scope and did not block the accepted Phase D workflow.
 
-### v1.10.0 container-bound runtime development validation
+### v1.10.0 container-bound runtime validation
 
-v1.10.0 is **IN DEVELOPMENT**, not released. Bounded runtime validation in the container-bound project has confirmed `onOpen()` and custom-menu startup, active-row selection, the full workflow, new receipt extraction through OpenAI, and archival PDF packaging including temporary-document cleanup. This is evidence for the accepted runtime path only; it is not a claim of universal receipt or merchant compatibility.
+Bounded runtime validation in the container-bound project confirmed `onOpen()` and custom-menu startup, active-row selection, the full workflow, new receipt extraction through OpenAI, and archival PDF packaging including temporary-document cleanup. This is evidence for the accepted runtime path only; it is not a claim of universal receipt or merchant compatibility.
 
 ---
 
