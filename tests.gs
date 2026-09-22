@@ -1,10 +1,10 @@
 /**
- * QUnitGS2 tests for Generator-Werkbon-GAS v1.8.0.
+ * QUnitGS2 tests for Generator-Werkbon-GAS.
  *
- * Run the allowlisted normal batches as independent QUnitGS2 lifecycles;
- * there is no monolithic or "all" batch. Validate current unpublished source
- * through the head/test /dev deployment. An /exec URL may target a versioned
- * deployment and does not prove that current local/head source was executed.
+ * Run allowlisted batches as independent QUnitGS2 lifecycles; there is no
+ * monolithic or "all tests" lifecycle. Authoritative validation uses a
+ * verified isolated deployment whose source/version identity is established.
+ * Choose its route from verified deployment identity, not fixed /dev or /exec assumptions.
  */
 
 var QUnit = QUnitGS2.QUnit;

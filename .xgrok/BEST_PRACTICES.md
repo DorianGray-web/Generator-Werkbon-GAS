@@ -7,7 +7,7 @@ Read and follow it before modifying this repository.
 
 This is a Google Apps Script project managed with clasp.
 
-- Canonical source: `.gs` files (`00_Config.gs` through `07_DataHelpers.gs`)
+- Current module boundaries and source classifications are authoritative in `../AGENTS.md`.
 - Tests: `tests.gs` using QUnitGS2 in Apps Script
 - Manifest: `appsscript.json` (V8 runtime, QUnitGS2 library, OAuth scopes)
 - Do not create parallel `.js` source files.

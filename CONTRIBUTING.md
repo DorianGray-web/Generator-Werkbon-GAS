@@ -120,8 +120,8 @@ Every contribution should be understandable, tested, and maintainable by humans.
 
 Before submitting a Pull Request:
 
-- Test your changes.
-- Make sure the project still works correctly.
+- Follow the authoritative QUnitGS2 validation contract in `AGENTS.md`: run applicable authoritative batches independently and run permanent-partition validation where governed.
+- Treat `tests.gs` as authoritative for current batch names and count metadata; do not duplicate volatile counts here.
 - Keep commits focused on one logical change.
 - Update documentation if necessary.
 
