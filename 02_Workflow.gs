@@ -12,6 +12,11 @@ async function runFullWorkflow() {
       return SpreadsheetApp.openById(spreadsheetId);
     },
     processNewReceipts: processNewReceipts,
+    resolveLifecycle: function (ss) {
+      const generalSheet = ss.getSheetByName(SHEETS.werkbonnen);
+      if (!generalSheet) throw new Error("The 'Werkbonnen' sheet was not found!");
+      return getWerkbonLifecycleState_(generalSheet);
+    },
     flush: function () { SpreadsheetApp.flush(); },
     sleep: function () { Utilities.sleep(1000); },
     generateWerkbon: generateWerkbon,
@@ -24,13 +29,24 @@ async function runFullWorkflowWithDependencies_(dependencies) {
 
   try {
     console.log('=== START FULL WERKBON PROCESS ===');
+    const lifecycle = dependencies.resolveLifecycle(ss);
 
-    dependencies.processNewReceipts();
+    dependencies.processNewReceipts(lifecycle.bonId);
+
+    if (lifecycle.status === 'actief') {
+      dependencies.toast(
+        ss,
+        'Receipt processing completed. Werkbon remains active. Final PDF was not created.',
+        'Done',
+        8
+      );
+      return;
+    }
 
     dependencies.flush();
     dependencies.sleep();
 
-    await dependencies.generateWerkbon(ss);
+    await dependencies.generateWerkbon(ss, lifecycle.bonId);
 
     console.log('=== FULL WERKBON PROCESS FINISHED ===');
     dependencies.toast(

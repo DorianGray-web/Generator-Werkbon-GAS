@@ -2,7 +2,7 @@
 // WERKBON PDF GENERATION
 // =========================================================================
 
-async function generateWerkbon(spreadsheet) {
+async function generateWerkbon(spreadsheet, optionalBonId) {
   return generateWerkbonWithDependencies_(spreadsheet, {
     getConfigValue: getRequiredConfigValue,
     getActiveSpreadsheet: function () {
@@ -15,10 +15,10 @@ async function generateWerkbon(spreadsheet) {
     loadContext: loadWerkbonContext,
     populateDocument: populateWerkbonDocument,
     exportPdf: exportWerkbonPdf,
-  });
+  }, optionalBonId);
 }
 
-async function generateWerkbonWithDependencies_(spreadsheet, dependencies) {
+async function generateWerkbonWithDependencies_(spreadsheet, dependencies, optionalBonId) {
   const templateDocId = dependencies.getConfigValue(
     CONFIG.templateDocId,
     'TEMPLATE_DOC_ID'
@@ -37,14 +37,16 @@ async function generateWerkbonWithDependencies_(spreadsheet, dependencies) {
   const generalSheet = ss.getSheetByName(SHEETS.werkbonnen);
 
   if (!generalSheet) {
-    return dependencies.showMessage("The 'Werkbonnen' sheet was not found!");
+    throw new Error("The 'Werkbonnen' sheet was not found!");
   }
 
-  const context = dependencies.loadContext(ss, generalSheet);
+  const context = dependencies.loadContext(ss, generalSheet, optionalBonId);
 
   if (!context) {
     return;
   }
+
+  assertWerkbonFinalizationReady_(context);
 
   console.time('Step 2: Copy the template and open the document');
   const outputFolder = dependencies.getFolderById(pdfOutputFolderId);
@@ -70,20 +72,13 @@ async function generateWerkbonWithDependencies_(spreadsheet, dependencies) {
   );
 }
 
-function loadWerkbonContext(ss, generalSheet) {
+function loadWerkbonContext(ss, generalSheet, optionalBonId) {
   console.time('Step 1: Load and filter data in memory');
-  const bonId = getSelectedWerkbonId(generalSheet);
-
-  const allData = generalSheet.getDataRange().getValues();
-  const startRowIndex = findWerkbonRowIndex(allData, bonId);
-
-  if (startRowIndex === -1) {
-    console.timeEnd('Step 1: Load and filter data in memory');
-    Browser.msgBox(`Error: ID ${bonId} was not found in column A of the Werkbonnen sheet.`);
-    return null;
-  }
-
-  const context = buildWerkbonContext(ss, generalSheet, allData, startRowIndex, bonId);
+  const lifecycle = getWerkbonLifecycleState_(generalSheet, optionalBonId);
+  const context = buildWerkbonContext(
+    ss, generalSheet, lifecycle.allData, lifecycle.startRowIndex, lifecycle.bonId
+  );
+  context.status = lifecycle.status;
   console.timeEnd('Step 1: Load and filter data in memory');
 
   return context;
@@ -114,7 +109,6 @@ function buildWerkbonContext(ss, generalSheet, allData, startRowIndex, bonId) {
     bonId,
     datumFormatted: formatWerkbonDate(datumRaw),
     locatieData,
-    totaalUrenFormatted: generalSheet.getRange(startRowIndex + 1, 6).getDisplayValue(),
     urenRows: relatedRows.urenRows,
     rawMatRows: relatedRows.rawMatRows,
     matRows: relatedRows.matRows,
@@ -209,7 +203,7 @@ function populateWerkbonDocument(body, context) {
     appendAanvullingen(body, context.aanvullingenRows);
   }
 
-  body.replaceText('{{TotalUren}}', context.totaalUrenFormatted || calculateTotalHours(context.urenRows));
+  body.replaceText('{{TotalUren}}', calculateTotalHours(context.urenRows));
   console.timeEnd('Step 5: Process card tables (Omschrijving / Werkzaamheden)');
 }
 
@@ -252,6 +246,46 @@ async function exportWerkbonPdf(tempCopyId, outputFolder, bonId, materialRows) {
       getFileById: function (fileId) { return DriveApp.getFileById(fileId); },
     }
   );
+}
+
+function normalizeWerkbonStatus_(value) {
+  const status = String(value === null || value === undefined ? '' : value)
+    .trim().toLowerCase();
+  if (status !== 'actief' && status !== 'klaar') {
+    throw new Error('Werkbon status must be "actief" or "klaar".');
+  }
+  return status;
+}
+
+function getWerkbonLifecycleState_(generalSheet, optionalBonId) {
+  const bonId = optionalBonId === undefined
+    ? getSelectedWerkbonId(generalSheet)
+    : cleanId(optionalBonId);
+  if (!bonId) throw new Error('A Werkbon ID is required.');
+  const allData = generalSheet.getDataRange().getValues();
+  const startRowIndex = findWerkbonRowIndex(allData, bonId);
+  if (startRowIndex === -1) throw new Error('The selected Werkbon was not found.');
+  return {
+    bonId,
+    allData,
+    startRowIndex,
+    status: normalizeWerkbonStatus_(allData[startRowIndex][7]),
+  };
+}
+
+function assertWerkbonFinalizationReady_(context) {
+  if (normalizeWerkbonStatus_(context.status) !== 'klaar') {
+    throw new Error('Werkbon must be "klaar" before the final PDF can be created.');
+  }
+  let totalMinutes;
+  try {
+    totalMinutes = calculateTotalMinutes(context.urenRows || []);
+  } catch (error) {
+    throw new Error('Working time is required before this Werkbon can be finalized.');
+  }
+  if (!context.urenRows || context.urenRows.length === 0 || totalMinutes <= 0) {
+    throw new Error('Working time is required before this Werkbon can be finalized.');
+  }
 }
 
 async function exportWerkbonPdfWithDependencies_(

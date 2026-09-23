@@ -143,20 +143,36 @@ function appendAanvullingenSection(body, rows, title, asBullets) {
   });
 }
 
-function calculateTotalHours(urenRows) {
+function calculateTotalMinutes(urenRows) {
   let totalMinutes = 0;
 
   urenRows.forEach(row => {
-    const durationStr = row[4] ? row[4].toString().trim() : '';
+    const durationValue = row[4];
+    const durationStr = durationValue === null || durationValue === undefined
+      ? '' : durationValue.toString().trim();
 
     if (durationStr.indexOf(':') !== -1) {
+      if (!/^\d+:\d{2}$/.test(durationStr)) throw new Error('Invalid Uren duration.');
       const parts = durationStr.split(':');
-      totalMinutes += (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+      const minutes = Number(parts[1]);
+      if (minutes >= 60) throw new Error('Invalid Uren duration.');
+      totalMinutes += Number(parts[0]) * 60 + minutes;
     } else {
-      totalMinutes += Math.round((parseFloat(durationStr) || 0) * 60);
+      if (durationStr && !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(durationStr)) {
+        throw new Error('Invalid Uren duration.');
+      }
+      totalMinutes += Math.round(Number(durationStr) * 60);
     }
   });
 
+  if (!Number.isSafeInteger(totalMinutes) || totalMinutes < 0) {
+    throw new Error('Invalid Uren duration.');
+  }
+  return totalMinutes;
+}
+
+function calculateTotalHours(urenRows) {
+  const totalMinutes = calculateTotalMinutes(urenRows);
   const finalHours = Math.floor(totalMinutes / 60);
   const finalMinutes = totalMinutes % 60;
 

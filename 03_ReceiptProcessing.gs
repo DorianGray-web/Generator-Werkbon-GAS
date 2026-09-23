@@ -6,7 +6,7 @@
  * Scans the receipts Drive folder and extracts receipt data with OpenAI Vision.
  * Now supports processing multiple unrecognized receipts in one run.
  */
-function processNewReceipts() {
+function processNewReceipts(optionalBonId) {
   const spreadsheetId = getRequiredConfigValue(CONFIG.spreadsheetId, 'SPREADSHEET_ID');
   const receiptsFolderId = getRequiredConfigValue(
     CONFIG.openAIReceiptsFolderId,
@@ -22,7 +22,10 @@ function processNewReceipts() {
     return;
   }
 
-  const bonId = getSelectedWerkbonId(generalSheet);
+  const bonId = optionalBonId === undefined
+    ? getSelectedWerkbonId(generalSheet)
+    : cleanId(optionalBonId);
+  if (!bonId) throw new Error('A Werkbon ID is required for receipt processing.');
   console.log(`Successfully identified the target order ID: ${bonId}`);
 
   const filesToProcess = findAllUnprocessedReceipts(receiptsFolderId);

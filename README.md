@@ -126,6 +126,8 @@ Production source is deployed to an Apps Script project that is bound to the tar
 
 An Apps Script editor run has a different execution context: an active Spreadsheet, sheet, or range is not guaranteed. `EDITOR_TEST_WERKBON_ID` exists only for explicit editor/test execution and must remain absent from normal production configuration. Without a trusted active row or an explicit editor/test identifier, Werkbon selection fails closed instead of falling back to stale cursor state.
 
+The full workflow pins the selected Werkbon ID for receipt processing and generation. With Status `actief`, it processes receipts and stops without creating a final PDF. With Status `klaar`, it processes receipts and proceeds to finalization only if matching `Werkbon_Uren` rows provide a positive total duration. Direct **Create PDF only** follows the same `klaar` and Uren gate. Generated Total Uren comes from `Werkbon_Uren`, not Werkbonnen column F; Materials rows are optional. Repeating finalization and multi-Werkbon allocation are not covered by this workflow.
+
 ---
 
 ## 🛠 Technologies

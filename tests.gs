@@ -581,7 +581,7 @@ function doGet(options) {
     },
   );
 
-  QUnit.module("legacy-production"); // 51 tests / 119 assertions
+  QUnit.module("legacy-production"); // 54 tests / 134 assertions
 
   // ==================================================
   // CONFIG HELPERS
@@ -1037,6 +1037,30 @@ function doGet(options) {
     ];
 
     assert.equal(calculateTotalHours(rows), "0:00");
+  });
+
+  QUnit.test("Uren minutes — HH:MM and decimal hours share one total", function (assert) {
+    const rows = [["BON", "", "", "", "1:30"], ["BON", "", "", "", "0.25"]];
+    assert.equal(calculateTotalMinutes(rows), 105);
+    assert.equal(calculateTotalHours(rows), "1:45");
+    assert.equal(calculateTotalMinutes([["BON", "", "", "", ""]]), 0);
+    assert.equal(calculateTotalMinutes([["BON", "", "", "", "0:00"]]), 0);
+  });
+
+  QUnit.test("Uren minutes — malformed and negative values fail closed", function (assert) {
+    ["1:xx", "1:60", "1:30:00", "1.5hours", "-1", "-0:30"].forEach(function (value) {
+      assert.throws(function () {
+        calculateTotalMinutes([["BON", "", "", "", "2:00"], ["BON", "", "", "", value]]);
+      }, /Invalid Uren duration/, value + " is rejected rather than partially counted");
+    });
+  });
+
+  QUnit.test("Werkbon status — only trimmed actief and klaar are valid", function (assert) {
+    assert.equal(normalizeWerkbonStatus_(" actief "), "actief");
+    assert.equal(normalizeWerkbonStatus_(" KLAAR "), "klaar");
+    assert.throws(function () { normalizeWerkbonStatus_(""); }, /Werkbon status/);
+    assert.throws(function () { normalizeWerkbonStatus_("done"); }, /Werkbon status/);
+    assert.throws(function () { normalizeWerkbonStatus_("active"); }, /Werkbon status/);
   });
 
   // ==================================================
@@ -13597,7 +13621,68 @@ function registerWerkbonExportIntegrationQUnitTests_() {
     };
   }
 
-  QUnit.module("werkbon-export-integration"); // 11 tests / 43 assertions
+  function createStatusAwareGenerationFixture_(status, urenRows, materialRows, columnF) {
+    const state = { copies: 0, folderCalls: 0, exports: 0, replacements: {}, receivedBonId: null };
+    const generalRows = [
+      ["ID", "Date", "Location", "Description", "Work", "Hours", "Material", "Status"],
+      ["BON", "2026-09-23", "LOC", "Description", "Work", columnF || "", "", status],
+    ];
+    function sheet_(rows) {
+      return {
+        getDataRange: function () { return { getValues: function () { return rows; } }; },
+        getLastRow: function () { return rows.length; },
+        getLastColumn: function () { return rows[0].length; },
+        getRange: function () {
+          return {
+            getValues: function () { return rows; },
+            getDisplayValues: function () { return rows; },
+          };
+        },
+      };
+    }
+    const generalSheet = sheet_(generalRows);
+    const hoursSheet = sheet_([["ID", "Date", "From", "To", "Hours"]].concat(urenRows || []));
+    const materialsSheet = sheet_([["ID", "Name", "Price", "Qty", "Total", "Key", "DocTotal"]]
+      .concat(materialRows || []));
+    const spreadsheet = {
+      getSheetByName: function (name) {
+        if (name === SHEETS.werkbonnen) return generalSheet;
+        if (name === SHEETS.uren) return hoursSheet;
+        if (name === SHEETS.materialen) return materialsSheet;
+        return null;
+      },
+    };
+    const body = {
+      replaceText: function (tag, value) { state.replacements[tag] = value; },
+      getTables: function () { return [null, null, null, null]; },
+    };
+    const dependencies = {
+      getConfigValue: function (value) { return value; },
+      getActiveSpreadsheet: function () { return spreadsheet; },
+      showMessage: function () {},
+      getFolderById: function () { state.folderCalls += 1; return {}; },
+      getFileById: function () {
+        return {
+          makeCopy: function () {
+            state.copies += 1;
+            return { getId: function () { return "synthetic-doc"; } };
+          },
+        };
+      },
+      openDocumentById: function () {
+        return { getBody: function () { return body; }, saveAndClose: function () {} };
+      },
+      loadContext: function (ss, sheet, pinnedBonId) {
+        state.receivedBonId = pinnedBonId;
+        return loadWerkbonContext(ss, sheet, pinnedBonId === undefined ? "BON" : pinnedBonId);
+      },
+      populateDocument: populateWerkbonDocument,
+      exportPdf: function () { state.exports += 1; return Promise.resolve(); },
+    };
+    return { spreadsheet, generalRows, state, dependencies };
+  }
+
+  QUnit.module("werkbon-export-integration"); // 20 tests / 86 assertions
 
   QUnit.test(
     "Werkbon export integration — raw material rows remain separate from presentation rows",
@@ -13805,7 +13890,9 @@ function registerWerkbonExportIntegrationQUnitTests_() {
         getSheetByName: function () { return generalSheet; },
       };
       const outputFolder = {};
-      const context = { bonId: "BON", rawMatRows };
+      const context = {
+        bonId: "BON", status: "klaar", urenRows: [["BON", "", "", "", "1:00"]], rawMatRows,
+      };
       const dependencies = {
         getConfigValue: function (value) { return value; },
         getActiveSpreadsheet: function () { return null; },
@@ -13859,6 +13946,7 @@ function registerWerkbonExportIntegrationQUnitTests_() {
       });
       const operation = runFullWorkflowWithDependencies_({
         openSpreadsheet: function () { return {}; },
+        resolveLifecycle: function () { return { bonId: "BON", status: "klaar" }; },
         processNewReceipts: function () { events.push("receipts"); },
         flush: function () { events.push("flush"); },
         sleep: function () { events.push("sleep"); },
@@ -13887,6 +13975,7 @@ function registerWerkbonExportIntegrationQUnitTests_() {
       const events = [];
       await runFullWorkflowWithDependencies_({
         openSpreadsheet: function () { return {}; },
+        resolveLifecycle: function () { return { bonId: "BON", status: "klaar" }; },
         processNewReceipts: function () { events.push("receipts"); },
         flush: function () { events.push("flush"); },
         sleep: function () { events.push("sleep"); },
@@ -13905,6 +13994,153 @@ function registerWerkbonExportIntegrationQUnitTests_() {
       );
     }
   );
+
+  QUnit.test("Status workflow — actief processes one pinned ID without PDF", async function (assert) {
+    assert.expect(5);
+    let resolutions = 0;
+    let receiptId = null;
+    let generationCalls = 0;
+    let flushCalls = 0;
+    let toast = null;
+    await runFullWorkflowWithDependencies_({
+      openSpreadsheet: function () { return {}; },
+      resolveLifecycle: function () { resolutions += 1; return { bonId: "BON-A", status: "actief" }; },
+      processNewReceipts: function (id) { receiptId = id; },
+      flush: function () { flushCalls += 1; },
+      sleep: function () {},
+      generateWerkbon: function () { generationCalls += 1; },
+      toast: function (ss, message, title) { toast = { message, title }; },
+    });
+    assert.equal(resolutions, 1);
+    assert.equal(receiptId, "BON-A");
+    assert.equal(generationCalls, 0);
+    assert.equal(flushCalls, 0);
+    assert.ok(toast.title === "Done" && /Final PDF was not created/.test(toast.message));
+  });
+
+  QUnit.test("Status workflow — klaar keeps pinned identity after selection changes", async function (assert) {
+    assert.expect(4);
+    let activeSelection = "BON-A";
+    let receiptId = null;
+    let generationId = null;
+    const events = [];
+    await runFullWorkflowWithDependencies_({
+      openSpreadsheet: function () { return {}; },
+      resolveLifecycle: function () { return { bonId: activeSelection, status: "klaar" }; },
+      processNewReceipts: function (id) { receiptId = id; activeSelection = "BON-B"; events.push("receipt"); },
+      flush: function () { events.push("flush"); },
+      sleep: function () { events.push("sleep"); },
+      generateWerkbon: function (ss, id) { generationId = id; events.push("generate"); },
+      toast: function (ss, message, title) { events.push(title); },
+    });
+    assert.equal(receiptId, "BON-A");
+    assert.equal(generationId, "BON-A");
+    assert.equal(activeSelection, "BON-B");
+    assert.equal(events.join("|"), "receipt|flush|sleep|generate|Done");
+  });
+
+  QUnit.test("Status workflow — klaar without Uren reports failure before artifacts", async function (assert) {
+    assert.expect(4);
+    const fixture = createStatusAwareGenerationFixture_("klaar", []);
+    let receiptId = null;
+    let toast = null;
+    await runFullWorkflowWithDependencies_({
+      openSpreadsheet: function () { return fixture.spreadsheet; },
+      resolveLifecycle: function () {
+        return getWerkbonLifecycleState_(fixture.spreadsheet.getSheetByName(SHEETS.werkbonnen), "BON");
+      },
+      processNewReceipts: function (id) { receiptId = id; },
+      flush: function () {}, sleep: function () {},
+      generateWerkbon: function (ss, id) {
+        return generateWerkbonWithDependencies_(ss, fixture.dependencies, id);
+      },
+      toast: function (ss, message, title) { toast = { message, title }; },
+    });
+    assert.equal(receiptId, "BON");
+    assert.ok(toast.title === "Error" && /Working time is required/.test(toast.message));
+    assert.equal(fixture.state.folderCalls + fixture.state.copies, 0);
+    assert.equal(fixture.state.exports, 0);
+  });
+
+  QUnit.test("Status workflow — empty and unknown status fail before receipts", async function (assert) {
+    assert.expect(6);
+    for (const status of ["", "finished"]) {
+      let receipts = 0;
+      let generations = 0;
+      let title = null;
+      await runFullWorkflowWithDependencies_({
+        openSpreadsheet: function () { return {}; },
+        resolveLifecycle: function () {
+          return { bonId: "BON", status: normalizeWerkbonStatus_(status) };
+        },
+        processNewReceipts: function () { receipts += 1; },
+        flush: function () {}, sleep: function () {},
+        generateWerkbon: function () { generations += 1; },
+        toast: function (ss, message, observedTitle) { title = observedTitle; },
+      });
+      assert.equal(receipts, 0);
+      assert.equal(generations, 0);
+      assert.equal(title, "Error");
+    }
+  });
+
+  QUnit.test("Direct generation — actief is blocked before template copy", async function (assert) {
+    assert.expect(4);
+    const fixture = createStatusAwareGenerationFixture_("actief", [["BON", "", "", "", "1:00"]]);
+    const error = await expectWerkbonExportRejection_(assert, function () {
+      return generateWerkbonWithDependencies_(fixture.spreadsheet, fixture.dependencies);
+    }, "actief cannot finalize");
+    assert.ok(/must be "klaar"/.test(error.message));
+    assert.ok(fixture.state.receivedBonId === undefined, "direct call retains no-argument selector contract");
+    assert.equal(fixture.state.folderCalls + fixture.state.copies, 0);
+    assert.equal(fixture.state.exports, 0);
+  });
+
+  QUnit.test("Direct generation — missing, zero and malformed Uren block artifacts", async function (assert) {
+    assert.expect(9);
+    const cases = [[], [["BON", "", "", "", "0:00"]], [["BON", "", "", "", "1:30bad"]]];
+    for (const rows of cases) {
+      const fixture = createStatusAwareGenerationFixture_("klaar", rows);
+      const error = await expectWerkbonExportRejection_(assert, function () {
+        return generateWerkbonWithDependencies_(fixture.spreadsheet, fixture.dependencies, "BON");
+      }, "invalid Uren cannot finalize");
+      assert.equal(error.message, "Working time is required before this Werkbon can be finalized.");
+      assert.equal(fixture.state.folderCalls + fixture.state.copies, 0);
+      assert.equal(fixture.state.exports, 0);
+    }
+  });
+
+  QUnit.test("Direct generation — positive Uren allow zero Materials and empty column F", async function (assert) {
+    assert.expect(5);
+    const fixture = createStatusAwareGenerationFixture_(" KLAAR ", [["BON", "", "", "", "1:30"]], [], "");
+    await generateWerkbonWithDependencies_(fixture.spreadsheet, fixture.dependencies, "BON");
+    assert.equal(fixture.state.receivedBonId, "BON");
+    assert.equal(fixture.state.copies, 1);
+    assert.equal(fixture.state.exports, 1);
+    assert.equal(fixture.state.replacements["{{TotalUren}}"], "1:30");
+    assert.equal(fixture.state.replacements["{{TotalMateriaal}}"], "€ 0,00");
+  });
+
+  QUnit.test("Direct generation — stale column F cannot override authoritative Uren", async function (assert) {
+    assert.expect(3);
+    const fixture = createStatusAwareGenerationFixture_("klaar", [["BON", "", "", "", "0.75"]], [], "99:00");
+    await generateWerkbonWithDependencies_(fixture.spreadsheet, fixture.dependencies, "BON");
+    assert.equal(fixture.state.replacements["{{TotalUren}}"], "0:45");
+    assert.equal(fixture.state.copies, 1);
+    assert.equal(fixture.state.exports, 1);
+  });
+
+  QUnit.test("Generation — pinned row status is re-read before artifacts", async function (assert) {
+    assert.expect(3);
+    const fixture = createStatusAwareGenerationFixture_("klaar", [["BON", "", "", "", "1:00"]]);
+    fixture.generalRows[1][7] = "actief";
+    const error = await expectWerkbonExportRejection_(assert, function () {
+      return generateWerkbonWithDependencies_(fixture.spreadsheet, fixture.dependencies, "BON");
+    }, "changed status must fail closed");
+    assert.ok(/must be "klaar"/.test(error.message));
+    assert.equal(fixture.state.folderCalls + fixture.state.copies, 0);
+    assert.equal(fixture.state.exports, 0);
+  });
 }
 
 function createMockOpenAIResponse(content) {
