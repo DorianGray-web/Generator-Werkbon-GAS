@@ -967,7 +967,10 @@ function parseOpenAIPdfReceiptResponse(responseText) {
     // 3. Current structured { items, additionalCosts, vat, totals }
     if (parsedData && typeof parsedData === 'object' && !Array.isArray(parsedData)) {
       return {
-        items: validateReceiptItems(parsedData.items || []),
+        items: validateReceiptItems(parsedData.items || [], {
+          vat: parsedData.vat,
+          totals: parsedData.totals
+        }),
         additionalCosts: validateAdditionalCosts(parsedData.additionalCosts || []),
         vat: parsedData.vat || null,
         totals: parsedData.totals || null
@@ -984,7 +987,7 @@ function parseOpenAIPdfReceiptResponse(responseText) {
   }
 }
 
-function validateReceiptItems(items) {
+function validateReceiptItems(items, pdfValidationContext) {
   if (!Array.isArray(items)) {
     return [];
   }
@@ -1026,8 +1029,12 @@ function validateReceiptItems(items) {
       Number.isFinite(unitPrice) &&
       Math.abs(lineTotalValue - (quantity * unitPrice)) > 0.01
     ) {
-      console.log(`Receipt item #${index + 1} skipped: inconsistent line total for "${name}".`);
-      return;
+      if (!matchesSingleItemPdfCrossVatBasis_(
+        items, quantity, unitPrice, lineTotalValue, pdfValidationContext
+      )) {
+        console.log(`Receipt item #${index + 1} skipped: inconsistent line total for "${name}".`);
+        return;
+      }
     }
 
     validItems.push({
@@ -1040,6 +1047,31 @@ function validateReceiptItems(items) {
   });
 
   return validItems;
+}
+
+function matchesSingleItemPdfCrossVatBasis_(items, quantity, unitPrice, lineTotal, context) {
+  if (items.length !== 1 || !context || !context.totals) return false;
+
+  const totals = context.totals;
+  const vat = context.vat;
+  const hasVatAmount = vat && vat.amount !== null && vat.amount !== undefined;
+  const hasTotalsVatAmount = totals.vatAmount !== null && totals.vatAmount !== undefined;
+  if (
+    (!hasVatAmount && !hasTotalsVatAmount) ||
+    (hasVatAmount && !Number.isFinite(vat.amount)) ||
+    (hasTotalsVatAmount && !Number.isFinite(totals.vatAmount))
+  ) return false;
+
+  const vatAmount = hasVatAmount ? vat.amount : totals.vatAmount;
+  return Number.isFinite(quantity) && Number.isFinite(unitPrice) &&
+    Number.isFinite(lineTotal) &&
+    Number.isFinite(totals.exclVAT) && Number.isFinite(totals.inclVAT) &&
+    totals.exclVAT >= 0 && totals.inclVAT > 0 && vatAmount > 0 &&
+    Math.abs(quantity * unitPrice - totals.inclVAT) <= 0.01 &&
+    Math.abs(lineTotal - totals.exclVAT) <= 0.01 &&
+    Math.abs(totals.exclVAT + vatAmount - totals.inclVAT) <= 0.01 &&
+    (!hasVatAmount || !hasTotalsVatAmount ||
+      Math.abs(vat.amount - totals.vatAmount) <= 0.01);
 }
 
 function validateAdditionalCosts(additionalCosts) {

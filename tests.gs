@@ -581,7 +581,7 @@ function doGet(options) {
     },
   );
 
-  QUnit.module("legacy-production"); // 51 tests / 119 assertions
+  QUnit.module("legacy-production"); // 56 tests / 144 assertions
 
   // ==================================================
   // CONFIG HELPERS
@@ -1628,6 +1628,115 @@ function doGet(options) {
       const normalized = normalizeAndAggregateReceiptData(parsed);
       assert.ok(normalized.reconciled);
       assert.ok(Math.abs(normalized.finalSum - 10) < 0.01);
+    },
+  );
+
+  QUnit.test(
+    "PDF mixed VAT basis — single printed item survives parser and reconciliation",
+    function (assert) {
+      const response = JSON.stringify({
+        output: [{
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              items: [{ name: "Synthetic item", quantity: 1, unitPrice: 57.70, lineTotal: 47.69 }],
+              additionalCosts: [],
+              vat: { rate: 0.21, amount: 10.01 },
+              totals: { exclVAT: 47.69, inclVAT: 57.70, vatAmount: 10.01 },
+            }),
+          }],
+        }],
+      });
+
+      const parsed = parseOpenAIPdfReceiptResponse(response);
+      assert.equal(parsed.items.length, 1);
+      assert.equal(parsed.items[0].name, "Synthetic item");
+      assert.equal(parsed.items[0].quantity, 1);
+      assert.equal(parsed.items[0].unitPrice, 57.70);
+      assert.equal(parsed.items[0].lineTotal, 47.69);
+      assert.equal(parsed.totals.inclVAT, 57.70);
+
+      const normalized = normalizeAndAggregateReceiptData(parsed);
+      assert.equal(normalized.rows.length, 1);
+      assert.equal(normalized.rows[0].price, 57.70);
+      assert.equal(normalized.finalSum, 57.70);
+      assert.ok(normalized.reconciled);
+      assert.equal(normalized.documentTotalInclVat, 57.70);
+    },
+  );
+
+  QUnit.test(
+    "PDF mixed VAT basis — same-basis and context-free callers remain unchanged",
+    function (assert) {
+      const sameBasis = [{ name: "Same basis", quantity: 2, unitPrice: 5, lineTotal: 10 }];
+      const mixedBasis = [{ name: "Mixed basis", quantity: 1, unitPrice: 57.70, lineTotal: 47.69 }];
+      assert.equal(validateReceiptItems(sameBasis).length, 1);
+      assert.equal(validateReceiptItems(sameBasis, { totals: null, vat: null }).length, 1);
+      assert.equal(validateReceiptItems(mixedBasis).length, 0);
+    },
+  );
+
+  QUnit.test(
+    "PDF mixed VAT basis — mismatched and contradictory document evidence rejects row",
+    function (assert) {
+      const item = [{ name: "Synthetic item", quantity: 1, unitPrice: 57.70, lineTotal: 47.69 }];
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: 10.31 },
+        totals: { exclVAT: 47.69, inclVAT: 58, vatAmount: 10.31 },
+      }).length, 0, "document total does not match printed unit price");
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: 10.01 },
+        totals: { exclVAT: 47.69, inclVAT: 58, vatAmount: 10.01 },
+      }).length, 0, "VAT-like difference does not repair inconsistent totals");
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: 10.01 },
+        totals: { exclVAT: 47.69, inclVAT: 57.70, vatAmount: 9.99 },
+      }).length, 0, "two printed VAT amounts must agree");
+    },
+  );
+
+  QUnit.test(
+    "PDF mixed VAT basis — document totals cannot justify an arbitrary multi-item row",
+    function (assert) {
+      const items = [
+        { name: "Mixed basis", quantity: 1, unitPrice: 57.70, lineTotal: 47.69 },
+        { name: "Same basis", quantity: 1, unitPrice: 5, lineTotal: 5 },
+      ];
+      const validated = validateReceiptItems(items, {
+        vat: { amount: 10.01 },
+        totals: { exclVAT: 47.69, inclVAT: 57.70, vatAmount: 10.01 },
+      });
+      assert.equal(validated.length, 1);
+      assert.equal(validated[0].name, "Same basis");
+    },
+  );
+
+  QUnit.test(
+    "PDF mixed VAT basis — missing document evidence rejects mismatch",
+    function (assert) {
+      const item = [{ name: "Synthetic item", quantity: 1, unitPrice: 57.70, lineTotal: 47.69 }];
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: 10.01 }, totals: null,
+      }).length, 0, "totals are required");
+      assert.equal(validateReceiptItems(item, {
+        vat: null, totals: { exclVAT: 47.69, inclVAT: 57.70 },
+      }).length, 0, "VAT amount is required");
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: null },
+        totals: { exclVAT: 47.69, inclVAT: 57.70, vatAmount: null },
+      }).length, 0, "null VAT amounts are not evidence");
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: "10.01" },
+        totals: { exclVAT: 47.69, inclVAT: 57.70, vatAmount: 10.01 },
+      }).length, 0, "non-numeric VAT evidence is rejected");
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: 10.01 },
+        totals: { exclVAT: null, inclVAT: 57.70, vatAmount: 10.01 },
+      }).length, 0, "exclusive total is required");
+      assert.equal(validateReceiptItems(item, {
+        vat: { amount: 10.01 },
+        totals: { exclVAT: 47.69, inclVAT: null, vatAmount: 10.01 },
+      }).length, 0, "inclusive total is required");
     },
   );
 
