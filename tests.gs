@@ -12369,12 +12369,13 @@ function doGet(options) {
 
   validatePermanentStagedPartition_(stagedTestRegistrations);
   QUnit.test = registerQUnitTest;
-  QUnit.start();
-
   if (options && options.diagnosticsOnly === true) {
-    return buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+    return startQUnitDiagnosticReportAfterDone_(QUnit, function () {
+      return QUnitGS2.getResultsFromServer();
+    });
   }
 
+  QUnit.start();
   return QUnitGS2.getHtml();
 }
 
@@ -14036,9 +14037,74 @@ function getResultsFromServer() {
  * Runs the existing QUnitGS2 suite without rendering the HTML test UI.
  * Execute this function from the Apps Script editor and inspect the execution log.
  */
-function runQUnitDiagnostics(batchName) {
-  const report = doGet({ diagnosticsOnly: true, batch: batchName });
+async function runQUnitDiagnostics(batchName) {
+  const report = await doGet({ diagnosticsOnly: true, batch: batchName });
   console.log("QUnitGS2 batch " + batchName + ":\n" + report);
+  return report;
+}
+
+function startQUnitDiagnosticReportAfterDone_(qunit, readResults) {
+  const completion = new Promise(function (resolve) {
+    qunit.done(function () {
+      resolve();
+    });
+  });
+  qunit.start();
+  return completion.then(function () {
+    return buildQUnitDiagnosticReport(readResults());
+  });
+}
+
+// Manual-only regression: its independent lifecycle does not alter batch counts.
+async function runGenericQUnitDiagnosticCompletionRegression() {
+  QUnitGS2.init();
+  QUnit.config.filter = "";
+  QUnit.config.module = "generic-diagnostic-completion-regression";
+  QUnit.module("generic-diagnostic-completion-regression");
+  QUnit.test("generic diagnostics read only after completion", function (assert) {
+    const finish = assert.async();
+    let completionCallback;
+    let startCount = 0;
+    let readCount = 0;
+    const fakeQUnit = {
+      done: function (callback) { completionCallback = callback; },
+      start: function () { startCount += 1; },
+    };
+    const completeResults = JSON.stringify([
+      { type: "TESTS_RESULTS_ALL", value: { total: 1, passed: 1, failed: 0 } },
+    ]);
+    const reportPromise = startQUnitDiagnosticReportAfterDone_(fakeQUnit, function () {
+      readCount += 1;
+      return completeResults;
+    });
+    assert.equal(startCount, 1, "starts exactly one lifecycle");
+    assert.equal(readCount, 0, "does not read immediately after start");
+    completionCallback();
+    reportPromise.then(function (report) {
+      assert.equal(readCount, 1, "reads only after completion");
+      assert.equal(JSON.parse(report).status, "PASS", "returns completed report");
+      const missingResult = startQUnitDiagnosticReportAfterDone_(fakeQUnit, function () {
+        return "";
+      });
+      assert.equal(startCount, 2, "each diagnostic starts once");
+      completionCallback();
+      return missingResult;
+    }).then(function () {
+      assert.ok(false, "missing completion result must reject");
+    }, function (error) {
+      assert.ok(/no cached test results/.test(error.message), "missing result fails closed");
+    }).then(finish);
+  });
+
+  const completion = new Promise(function (resolve) {
+    QUnit.done(function () { resolve(); });
+  });
+  QUnit.start();
+  await completion;
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  if (JSON.parse(report).status !== "PASS") {
+    throw new Error("Generic QUnit diagnostic completion regression failed: " + report);
+  }
   return report;
 }
 
@@ -14218,69 +14284,69 @@ function imagePdfAdapterAcceptanceSha256Hex_(bytes) {
     .join("");
 }
 
-function runLegacyProductionQUnitDiagnostics() {
+async function runLegacyProductionQUnitDiagnostics() {
   return runQUnitDiagnostics("legacy-production");
 }
 
-function runStagedCoreQUnitDiagnostics() {
+async function runStagedCoreQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-core");
 }
 
-function runStagedSelectorHarnessQUnitDiagnostics() {
+async function runStagedSelectorHarnessQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-selector-harness");
 }
 
-function runStagedPrototypeCandidateQUnitDiagnostics() {
+async function runStagedPrototypeCandidateQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-prototype-candidate");
 }
 
-function runStagedFinancialEvidenceQUnitDiagnostics() {
+async function runStagedFinancialEvidenceQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-financial-evidence");
 }
 
-function runStagedImageIntegrationQUnitDiagnostics() {
+async function runStagedImageIntegrationQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-image-integration");
 }
 
-function runStagedStage1DiagnosticsQUnitDiagnostics() {
+async function runStagedStage1DiagnosticsQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-stage1-diagnostics");
 }
 
-function runStagedSourceTopologyQUnitDiagnostics() {
+async function runStagedSourceTopologyQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-source-topology");
 }
 
-function runStagedTableEvidenceDiagnosticsQUnitDiagnostics() {
+async function runStagedTableEvidenceDiagnosticsQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-table-evidence-diagnostics");
 }
 
-function runFinancialStructureQUnitDiagnostics() {
+async function runFinancialStructureQUnitDiagnostics() {
   return runQUnitDiagnostics("financial-structure");
 }
 
-function runFinancialCollectorQUnitDiagnostics() {
+async function runFinancialCollectorQUnitDiagnostics() {
   return runQUnitDiagnostics("financial-collector");
 }
 
-function runFinancialProvenanceQUnitDiagnostics() {
+async function runFinancialProvenanceQUnitDiagnostics() {
   return runQUnitDiagnostics("financial-provenance");
 }
 
-function runFinancialSemanticGovernanceQUnitDiagnostics() {
+async function runFinancialSemanticGovernanceQUnitDiagnostics() {
   return runQUnitDiagnostics("financial-semantic-governance");
 }
 
-function runFinancialInterpretationQUnitDiagnostics() {
+async function runFinancialInterpretationQUnitDiagnostics() {
   return runQUnitDiagnostics("financial-interpretation");
 }
 
-function runCanonicalReleaseQUnitDiagnostics() {
+async function runCanonicalReleaseQUnitDiagnostics() {
   return runQUnitDiagnostics("canonical-release");
 }
 
-function runCollectorWiskaQUnitDiagnostic() {
+async function runCollectorWiskaQUnitDiagnostic() {
   const diagnosticName = "collector-wiska";
-  const report = doGet({
+  const report = await doGet({
     diagnosticsOnly: true,
     diagnostic: diagnosticName,
   });
