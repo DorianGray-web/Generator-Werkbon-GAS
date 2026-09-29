@@ -29,6 +29,23 @@ structure, synchronization, runtime configuration, services, scopes, or librarie
 For receipt, VAT, reconciliation, material-total, and Werkbon
 business rules, follow the invariants defined in `../AGENTS.md`.
 
+## Script Property inspection safety
+
+Do not use Apps Script Project Settings UI, browser DOM or page-source
+inspection, or computer-use inspection of secret-bearing settings to check
+Script Properties: these views can expose secret values. For diagnostic,
+existence, or identity checks, use name-only enumeration such as
+`PropertiesService.getScriptProperties().getKeys()`; do not use
+`getProperties()` or `getProperty(secretName)` for these checks, and do not
+inspect any secret value or derivative. Legitimate application runtime code
+may use `getProperty(secretName)` internally when it needs the secret, but must
+not surface the value in logs, prompts, browser output, reports, or diagnostics.
+Verify project identity through safe metadata, and stop if that cannot prove
+the required project type without entering a secret-bearing settings view.
+If a secret is exposed in tool output, stop, close the view, and require manual
+revocation/rotation before secret-dependent validation resumes; do not copy or
+report the value. See `../.ai-workflow/LESSONS_LEARNED.md` (LL-007).
+
 ## Write-safety protocol
 
 ### Mandatory preflight
