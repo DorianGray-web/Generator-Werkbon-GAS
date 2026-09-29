@@ -101,3 +101,17 @@ If later evidence disproves or replaces a lesson, do not silently delete it. Mar
 - **Regression protection / verification:** Repository-level routing and Grok operational instructions are reviewable controls. Their paths and sequential lesson numbering are verified during this governance update.
 - **Do not repeat:** Do not permit an agent to report a successful bounded edit to a large or high-value file without checking the integrity of the entire saved file and the actual repository diff.
 - **Limitations / unresolved aspects:** These process guardrails reduce risk but do not prove that future agent writes are safe or prevent a tool from violating instructions.
+
+## LL-007 — Read-only settings inspection can expose Script Property secrets
+
+- **Status:** Active
+- **Area:** Apps Script project identity, Script Properties, agent tool safety
+- **Evidence level:** Real incident / near-miss
+- **Observed in / context:** An isolated-project preflight intended to verify project identity and Script Property presence.
+- **What happened:** Read-only browser inspection of Apps Script Project Settings unexpectedly surfaced the full `OPENAI_API_KEY` value in tool output. Execution stopped immediately, the exposing view was closed, and the value was not intentionally copied or reused. The credential was treated as exposed; manual revocation/rotation was required before dependent validation could continue. The value is not retained here.
+- **Incorrect assumption / failure pattern:** A read-only settings view was assumed safe for a name-only property-presence check, although it can render secret values.
+- **Resulting invariant or operational rule:** Never open or inspect Apps Script Project Settings through a browser, computer-use DOM, or page source to check Script Property presence or values. For existence checks, use only name-only enumeration such as `PropertiesService.getScriptProperties().getKeys()` or an equivalent helper returning names only; do not use `getProperties()`, which returns key/value pairs. Never inspect or report a secret's value, prefix, suffix, length, hash, or derived identifier. An existing runtime path may consume a required secret internally without surfacing it. Verify project identity through safe project/clasp/API metadata; if standalone or bound status cannot be proven without a secret-bearing settings surface, stop and seek another verification path.
+- **Incident response:** If a secret unexpectedly appears in tool or browser output, stop immediately; do not repeat, copy, or use it; close the exposing view; treat it as compromised; require manual revocation/rotation; and defer secret-dependent runtime validation until replacement is confirmed. Never put the secret in prompts, logs, reports, or commits.
+- **Do not repeat:** Do not substitute a convenient settings-page inspection for a name-only property check, even when the inspection itself is read-only.
+- **LAZY_SECRET_ACCESS_FOLLOW_UP:** Separately, safe preflight work found that `00_Config.gs` currently reads `OPENAI_API_KEY` during global `CONFIG` initialization, so unrelated Apps Script executions may access the secret store before the selected function body runs. This is a separate hardening concern, not the confirmed cause of the Settings/browser exposure. Lazy secret access has not been implemented.
+- **Limitations / unresolved aspects:** Name-only enumeration proves presence, not credential validity or safe project identity. Those require their own bounded verification.
