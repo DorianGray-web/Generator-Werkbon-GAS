@@ -1,19 +1,24 @@
 /**
  * Adapts the currently validated singular Stage-1-v2 printed-total evidence to
  * the experimental multi-observation financial boundary. A synthetic test may
- * instead provide financialEvidence.monetaryObservations directly. Supplying
- * both representations is a blocking conflict; neither silently wins.
+ * instead provide financialEvidence.monetaryObservations directly.
+ * Supplemental atomic Netto/BTW rows may accompany the separately linked
+ * printed total; overlapping or other dual representations still fail closed.
  */
 function collectFinancialEvidencePrototype_(
   extraction,
   printedTotalEvidence,
   groups,
 ) {
+  const sourceFinancialEvidence =
+    extraction && extraction.financialEvidence &&
+    typeof extraction.financialEvidence === "object"
+      ? extraction.financialEvidence
+      : null;
   const suppliedFinancialEvidence =
-    extraction &&
-    extraction.financialEvidence &&
-    Array.isArray(extraction.financialEvidence.monetaryObservations)
-      ? extraction.financialEvidence.monetaryObservations
+    sourceFinancialEvidence &&
+    Array.isArray(sourceFinancialEvidence.monetaryObservations)
+      ? sourceFinancialEvidence.monetaryObservations
       : null;
   const adaptedPrintedTotal = printedTotalEvidence
     ? [
@@ -35,11 +40,51 @@ function collectFinancialEvidencePrototype_(
     const parsed = parsePrototypeAmount_(group.anchorRow.lineTotalText);
     return parsed === null ? sum : sum + parsed.cents;
   }, 0);
+  const observationByOrder = {};
+  (extraction && Array.isArray(extraction.observedLines)
+    ? extraction.observedLines
+    : []).forEach(function (line) {
+    observationByOrder[line.order] = line;
+  });
+  const reservedOrders = {};
+  const sourceSummaryEvidence = extraction && extraction.summaryEvidence;
+  if (sourceSummaryEvidence) {
+    [
+      sourceSummaryEvidence.printedProductCount,
+      sourceSummaryEvidence.printedTotal,
+    ].forEach(function (item) {
+      if (item) reservedOrders[item.sourceLineOrder] = true;
+    });
+  }
+  (suppliedFinancialEvidence || []).forEach(function (observation) {
+    (Array.isArray(observation && observation.sourceLineOrders)
+      ? observation.sourceLineOrders
+      : []).forEach(function (order) {
+      reservedOrders[order] = true;
+    });
+  });
+  const vatBreakdownValidation = validateVatBreakdownEvidencePrototype_(
+    sourceFinancialEvidence,
+    observationByOrder,
+    reservedOrders,
+  );
 
-  if (suppliedFinancialEvidence !== null && adaptedPrintedTotal.length > 0) {
+  const supplementalSummaryOnly =
+    suppliedFinancialEvidence !== null && adaptedPrintedTotal.length > 0 &&
+    suppliedFinancialEvidence.every(function (observation) {
+      const label = normalizeFinancialLabelPrototype_(observation.labelText);
+      return (label === "netto" || label === "btw") &&
+        Array.isArray(observation.sourceLineOrders) &&
+        observation.sourceLineOrders.length === 1 &&
+        observation.sourceLineOrders[0] !== printedTotalEvidence.sourceLineOrder;
+    });
+  if (suppliedFinancialEvidence !== null && adaptedPrintedTotal.length > 0 &&
+      !supplementalSummaryOnly) {
     const conflicted = interpretFinancialEvidencePrototype_(
       suppliedFinancialEvidence,
       candidateItemSumCents,
+      vatBreakdownValidation.vatBreakdowns,
+      vatBreakdownValidation.conflicts,
     );
     conflicted.conflicts.push({
       code: "DUPLICATE_FINANCIAL_EVIDENCE_REPRESENTATION",
@@ -55,8 +100,10 @@ function collectFinancialEvidencePrototype_(
   return interpretFinancialEvidencePrototype_(
     suppliedFinancialEvidence === null
       ? adaptedPrintedTotal
-      : suppliedFinancialEvidence,
+      : suppliedFinancialEvidence.concat(adaptedPrintedTotal),
     candidateItemSumCents,
+    vatBreakdownValidation.vatBreakdowns,
+    vatBreakdownValidation.conflicts,
   );
 }
 
@@ -67,11 +114,15 @@ function collectFinancialEvidencePrototype_(
 function interpretFinancialEvidencePrototype_(
   sourceObservations,
   candidateItemSumCents,
+  sourceVatBreakdowns,
+  initialConflicts,
 ) {
   const observations = [];
   const interpretations = [];
+  const vatBreakdownInterpretations = [];
   const comparisons = [];
-  const conflicts = [];
+  const conflicts = (Array.isArray(initialConflicts) ? initialConflicts : [])
+    .map(clonePrototypeIssue_);
   const unsupportedCapabilities = [];
   const assignmentsByTarget = {};
   const seenEvidenceIds = {};
@@ -185,6 +236,177 @@ function interpretFinancialEvidencePrototype_(
     },
   );
 
+  (Array.isArray(sourceVatBreakdowns) ? sourceVatBreakdowns : []).forEach(
+    function (tuple) {
+      const rateBasisPoints = parseVatBreakdownRatePrototype_(tuple.rateText);
+      const taxableBase = parsePrototypeAmount_(tuple.taxableBaseText);
+      const vatAmount = parsePrototypeAmount_(tuple.vatAmountText);
+      const total = parsePrototypeAmount_(tuple.totalText);
+      const interpretation = {
+        evidenceId: tuple.evidenceId,
+        status: "conflict",
+        failureCode: null,
+        rateBasisPoints: rateBasisPoints,
+        taxableBaseCents: taxableBase && taxableBase.cents,
+        vatAmountCents: vatAmount && vatAmount.cents,
+        totalCents: total && total.cents,
+        totalVatBasis: tuple.totalVatBasisEvidence,
+        supportingEvidenceIds: [tuple.evidenceId],
+        ruleId: null,
+      };
+      vatBreakdownInterpretations.push(interpretation);
+
+      if (
+        rateBasisPoints === null || taxableBase === null ||
+        vatAmount === null || total === null
+      ) {
+        interpretation.failureCode = "INVALID_VAT_BREAKDOWN_EVIDENCE";
+        conflicts.push({
+          code: interpretation.failureCode,
+          evidenceIds: [tuple.evidenceId],
+        });
+        return;
+      }
+      if (Math.abs(taxableBase.cents + vatAmount.cents - total.cents) > 2) {
+        interpretation.failureCode = "CONTRADICTORY_VAT_BREAKDOWN";
+        conflicts.push({
+          code: interpretation.failureCode,
+          evidenceIds: [tuple.evidenceId],
+        });
+        return;
+      }
+
+      mergeVatBreakdownAssignmentPrototype_(
+        assignmentsByTarget,
+        conflicts,
+        "totals.vatAmount",
+        vatAmount.cents,
+        tuple.evidenceId,
+        "EXPLICIT_VAT_BREAKDOWN_AMOUNT",
+      );
+      if (tuple.totalVatBasisEvidence !== "inclVAT") {
+        interpretation.failureCode = "AMBIGUOUS_VAT_BREAKDOWN_TOTAL_BASIS";
+        conflicts.push({
+          code: interpretation.failureCode,
+          evidenceIds: [tuple.evidenceId],
+        });
+        return;
+      }
+      mergeVatBreakdownAssignmentPrototype_(
+        assignmentsByTarget,
+        conflicts,
+        "totals.inclVAT",
+        total.cents,
+        tuple.evidenceId,
+        "EXPLICIT_VAT_BREAKDOWN_TOTAL_INCL_VAT",
+      );
+      interpretation.status = "resolved";
+      interpretation.ruleId = "EXPLICIT_VAT_BREAKDOWN_TUPLE";
+
+      const matchingBareTotals = interpretations.filter(function (item) {
+        if (
+          item.failureCode !== "AMBIGUOUS_PRINTED_TOTAL_TYPE" ||
+          item.ruleId !== "BARE_DOCUMENT_TOTAL_LABEL"
+        ) {
+          return false;
+        }
+        const observation = observations.find(function (candidate) {
+          return candidate.evidenceId === item.evidenceId;
+        });
+        return observation && observation.parsedAmountCents === total.cents;
+      });
+      if (matchingBareTotals.length === 1) {
+        const bare = matchingBareTotals[0];
+        bare.status = "resolved";
+        bare.failureCode = null;
+        bare.resolvedVatBasis = "inclVAT";
+        bare.canonicalTarget = "totals.inclVAT";
+        bare.supportingEvidenceIds = [tuple.evidenceId, bare.evidenceId];
+        bare.ruleId = "EXPLICIT_VAT_BREAKDOWN_TOTAL_CORROBORATION";
+        const inclAssignment = assignmentsByTarget["totals.inclVAT"];
+        if (
+          inclAssignment &&
+          inclAssignment.supportingEvidenceIds.indexOf(bare.evidenceId) < 0
+        ) {
+          inclAssignment.supportingEvidenceIds.push(bare.evidenceId);
+          inclAssignment.ruleIds.push(bare.ruleId);
+        }
+        const ambiguousIndex = conflicts.findIndex(function (item) {
+          return item.code === "AMBIGUOUS_PRINTED_TOTAL_TYPE" &&
+            item.evidenceIds.length === 1 &&
+            item.evidenceIds[0] === bare.evidenceId;
+        });
+        if (ambiguousIndex >= 0) conflicts.splice(ambiguousIndex, 1);
+      } else if (matchingBareTotals.length > 1) {
+        conflicts.push({
+          code: "MULTIPLE_CANDIDATE_TOTALS",
+          evidenceIds: matchingBareTotals.map(function (item) {
+            return item.evidenceId;
+          }),
+        });
+      }
+    },
+  );
+
+  // A bare Totaal acquires an inclVAT basis only from separately printed,
+  // source-linked Netto and BTW amount rows whose arithmetic agrees.
+  const net = assignmentsByTarget["totals.exclVAT"];
+  const vat = assignmentsByTarget["totals.vatAmount"];
+  const bareTotals = interpretations.filter(function (item) {
+    return item.failureCode === "AMBIGUOUS_PRINTED_TOTAL_TYPE" &&
+      item.ruleId === "BARE_DOCUMENT_TOTAL_LABEL";
+  });
+  if (net && vat && bareTotals.length === 1) {
+    const bare = bareTotals[0];
+    const totalObservation = observations.find(function (item) {
+      return item.evidenceId === bare.evidenceId;
+    });
+    if (Math.abs(net.amountCents + vat.amountCents -
+        totalObservation.parsedAmountCents) <= 2) {
+      bare.status = "resolved";
+      bare.failureCode = null;
+      bare.resolvedVatBasis = "inclVAT";
+      bare.canonicalTarget = "totals.inclVAT";
+      bare.supportingEvidenceIds = net.supportingEvidenceIds.concat(
+        vat.supportingEvidenceIds, [bare.evidenceId],
+      );
+      bare.ruleId = "EXPLICIT_NETTO_BTW_TOTAL_RECONCILIATION";
+      assignmentsByTarget["totals.inclVAT"] = {
+        canonicalTarget: "totals.inclVAT",
+        amountCents: totalObservation.parsedAmountCents,
+        scope: "document",
+        supportingEvidenceIds: bare.supportingEvidenceIds.slice(),
+        ruleIds: [bare.ruleId],
+      };
+      const ambiguousIndex = conflicts.findIndex(function (item) {
+        return item.code === "AMBIGUOUS_PRINTED_TOTAL_TYPE" &&
+          item.evidenceIds.length === 1 &&
+          item.evidenceIds[0] === bare.evidenceId;
+      });
+      if (ambiguousIndex >= 0) conflicts.splice(ambiguousIndex, 1);
+    } else {
+      conflicts.push({
+        code: "CONTRADICTORY_VAT_SUMMARY",
+        evidenceIds: net.supportingEvidenceIds.concat(
+          vat.supportingEvidenceIds, [bare.evidenceId],
+        ),
+      });
+    }
+  }
+  const incl = assignmentsByTarget["totals.inclVAT"];
+  if (net && vat && incl &&
+      Math.abs(net.amountCents + vat.amountCents - incl.amountCents) > 2 &&
+      !conflicts.some(function (item) {
+        return item.code === "CONTRADICTORY_VAT_SUMMARY";
+      })) {
+    conflicts.push({
+      code: "CONTRADICTORY_VAT_SUMMARY",
+      evidenceIds: net.supportingEvidenceIds.concat(
+        vat.supportingEvidenceIds, incl.supportingEvidenceIds,
+      ),
+    });
+  }
+
   const ambiguousDocumentTotals = interpretations.filter(function (
     interpretation,
   ) {
@@ -227,6 +449,7 @@ function interpretFinancialEvidencePrototype_(
   const status = buildFinancialEvidenceStatusPrototype_(
     observations,
     interpretations,
+    vatBreakdownInterpretations,
     canonicalAssignments,
     conflicts,
     unsupportedCapabilities,
@@ -234,7 +457,11 @@ function interpretFinancialEvidencePrototype_(
 
   return {
     monetaryObservations: observations,
+    vatBreakdowns: (Array.isArray(sourceVatBreakdowns)
+      ? sourceVatBreakdowns
+      : []).map(cloneVatBreakdownEvidencePrototype_),
     interpretations: interpretations,
+    vatBreakdownInterpretations: vatBreakdownInterpretations,
     canonicalAssignments: canonicalAssignments,
     candidateItemSumCents: candidateItemSumCents,
     comparisons: comparisons,
@@ -242,6 +469,46 @@ function interpretFinancialEvidencePrototype_(
     unsupportedCapabilities: unsupportedCapabilities,
     status: status,
   };
+}
+
+function parseVatBreakdownRatePrototype_(value) {
+  if (!hasObservedTextPrototype_(value)) return null;
+  const match = /^(\d{1,3})(?:[.,](\d{1,2}))?%$/.exec(value.trim());
+  if (!match) return null;
+  const basisPoints = Number(match[1]) * 100 +
+    Number((match[2] || "").padEnd(2, "0") || 0);
+  return basisPoints > 0 && basisPoints <= 10000 ? basisPoints : null;
+}
+
+function mergeVatBreakdownAssignmentPrototype_(
+  assignmentsByTarget,
+  conflicts,
+  target,
+  amountCents,
+  evidenceId,
+  ruleId,
+) {
+  const existing = assignmentsByTarget[target];
+  if (!existing) {
+    assignmentsByTarget[target] = {
+      canonicalTarget: target,
+      amountCents: amountCents,
+      scope: "document",
+      supportingEvidenceIds: [evidenceId],
+      ruleIds: [ruleId],
+    };
+    return;
+  }
+  if (existing.amountCents === amountCents && existing.scope === "document") {
+    existing.supportingEvidenceIds.push(evidenceId);
+    existing.ruleIds.push(ruleId);
+    return;
+  }
+  conflicts.push({
+    code: "CONFLICTING_TYPED_TOTALS",
+    evidenceIds: existing.supportingEvidenceIds.concat([evidenceId]),
+    canonicalTarget: target,
+  });
 }
 
 function cloneFinancialObservationPrototype_(source) {
@@ -317,6 +584,18 @@ function interpretOneFinancialObservationPrototype_(observation) {
       vatBasis: null,
       canonicalTarget: "totals.vatAmount",
       ruleId: "EXPLICIT_VAT_AMOUNT_LABEL",
+    },
+    netto: {
+      meaning: "document_total",
+      vatBasis: "exclVAT",
+      canonicalTarget: "totals.exclVAT",
+      ruleId: "EXPLICIT_NETTO_LABEL",
+    },
+    btw: {
+      meaning: "vat_amount",
+      vatBasis: null,
+      canonicalTarget: "totals.vatAmount",
+      ruleId: "EXPLICIT_BTW_AMOUNT_LABEL",
     },
   };
   const supported = supportedRules[normalizedLabel];
@@ -427,20 +706,33 @@ function normalizeFinancialLabelPrototype_(labelText) {
 function buildFinancialEvidenceStatusPrototype_(
   observations,
   interpretations,
+  vatBreakdownInterpretations,
   canonicalAssignments,
   conflicts,
   unsupportedCapabilities,
 ) {
-  if (observations.length === 0) {
+  if (
+    observations.length === 0 &&
+    vatBreakdownInterpretations.length === 0
+  ) {
     return { resolved: false, code: "MISSING_PRINTED_TOTAL_EVIDENCE" };
   }
 
   const priorityCodes = [
     "DUPLICATE_FINANCIAL_EVIDENCE_REPRESENTATION",
+    "DUPLICATE_VAT_BREAKDOWN_EVIDENCE_ID",
+    "INVALID_VAT_BREAKDOWN_SOURCE_LINE",
+    "OVERLAPPING_VAT_BREAKDOWN_PROVENANCE",
+    "AMBIGUOUS_VAT_BREAKDOWN_PROVENANCE",
+    "AMBIGUOUS_VAT_BREAKDOWN_ASSOCIATION",
+    "INVALID_VAT_BREAKDOWN_EVIDENCE",
     "INVALID_FINANCIAL_EVIDENCE",
     "DUPLICATE_FINANCIAL_EVIDENCE_ID",
     "CONFLICTING_REPORTED_FINANCIAL_EVIDENCE",
     "CONFLICTING_TYPED_TOTALS",
+    "CONTRADICTORY_VAT_BREAKDOWN",
+    "AMBIGUOUS_VAT_BREAKDOWN_TOTAL_BASIS",
+    "CONTRADICTORY_VAT_SUMMARY",
     "MULTIPLE_CANDIDATE_TOTALS",
     "UNPARSEABLE_MONETARY_VALUE",
     "AMBIGUOUS_PRINTED_TOTAL_TYPE",
@@ -478,6 +770,8 @@ function buildFinancialEvidenceStatusPrototype_(
   const everyInterpretationResolved = interpretations.every(function (
     interpretation,
   ) {
+    return interpretation.status === "resolved";
+  }) && vatBreakdownInterpretations.every(function (interpretation) {
     return interpretation.status === "resolved";
   });
   return everyInterpretationResolved

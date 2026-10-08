@@ -16,7 +16,64 @@
  * remains pure and does not invoke OpenAI, normalization, or output services.
  */
 function buildStagedReceiptCandidate(extraction) {
-  return buildStagedReceiptCandidateExperiment(extraction);
+  const candidate = buildStagedReceiptCandidateExperiment(extraction);
+  const summaryEvidence = extraction.summaryEvidence || {};
+  const count = summaryEvidence.printedProductCount;
+  const total = summaryEvidence.printedTotal;
+  if (!count || !total) return candidate;
+
+  const observations = extraction.observedLines;
+  const countLabel = count.labelText;
+  if (
+    !Number.isInteger(count.sourceLineOrder) ||
+    count.sourceLineOrder <= 0 ||
+    typeof countLabel !== "string" ||
+    !countLabel.trim() ||
+    typeof count.rawText !== "string" ||
+    !count.rawText.startsWith(countLabel) ||
+    count.rawText.slice(countLabel.length).trim() !== count.valueText ||
+    observations.some(function (line) {
+      return typeof line.rawText === "string" &&
+        line.rawText.toLowerCase().indexOf(countLabel.toLowerCase()) >= 0;
+    })
+  ) return candidate;
+  if (observations.some(function (line) {
+    return line.order === count.sourceLineOrder;
+  })) return candidate;
+
+  const summaryRows = observations.filter(function (line) {
+    return line.roleEvidence === "summary";
+  });
+  if (
+    summaryRows.length !== 1 ||
+    summaryRows[0].order !== total.sourceLineOrder ||
+    candidate.structuralStatus.unconsumedRowOrders.length !== 0
+  ) return candidate;
+
+  const conflicts = candidate.structuralStatus.conflicts;
+  const countReferenceConflicts = [
+    "INVALID_SUMMARY_SOURCE_LINE",
+    "INCONSISTENT_SUMMARY_RAW_VALUE",
+  ];
+  if (
+    conflicts.length !== countReferenceConflicts.length ||
+    !countReferenceConflicts.every(function (code) {
+      return conflicts.some(function (conflict) {
+        return conflict.code === code &&
+          conflict.field === "printedProductCount" &&
+          conflict.rowOrder === count.sourceLineOrder;
+      });
+    })
+  ) return candidate;
+
+  // Only the unsupported optional count claim is removed from this candidate.
+  // The original Stage1V2 evidence remains unchanged for diagnostic capture.
+  const candidateEvidence = Object.assign({}, extraction, {
+    summaryEvidence: Object.assign({}, summaryEvidence, {
+      printedProductCount: null,
+    }),
+  });
+  return buildStagedReceiptCandidateExperiment(candidateEvidence);
 }
 
 function buildStagedReceiptPrototype(extraction) {
