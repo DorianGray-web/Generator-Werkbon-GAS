@@ -268,6 +268,15 @@ function validateSummaryEvidencePrototype_(
     });
   });
 
+  const vatBreakdownValidation = validateVatBreakdownEvidencePrototype_(
+    sourceFinancialEvidence,
+    observationByOrder,
+    referencedOrders,
+  );
+  vatBreakdownValidation.conflicts.forEach(function (conflict) {
+    conflicts.push(conflict);
+  });
+
   summaryObservations.forEach(function (line) {
     if (!referencedOrders[line.order]) {
       conflicts.push({
@@ -281,6 +290,220 @@ function validateSummaryEvidencePrototype_(
     summaryEvidence: summaryEvidence,
     conflicts: conflicts,
   };
+}
+
+function validateVatBreakdownEvidencePrototype_(
+  sourceFinancialEvidence,
+  observationByOrder,
+  referencedOrders,
+) {
+  const source =
+    sourceFinancialEvidence && typeof sourceFinancialEvidence === "object" &&
+    !Array.isArray(sourceFinancialEvidence)
+      ? sourceFinancialEvidence
+      : {};
+  const monetaryObservations = Array.isArray(source.monetaryObservations)
+    ? source.monetaryObservations
+    : [];
+  const tuples = Array.isArray(source.vatBreakdowns)
+    ? source.vatBreakdowns
+    : [];
+  const reserved = referencedOrders || {};
+  const validated = [];
+  const conflicts = [];
+  const seenEvidenceIds = {};
+  const seenTupleOrders = {};
+
+  if (tuples.length > 0 && monetaryObservations.length > 0) {
+    conflicts.push({
+      code: "DUPLICATE_FINANCIAL_EVIDENCE_REPRESENTATION",
+      rowOrder: null,
+    });
+  }
+
+  tuples.forEach(function (sourceTuple) {
+    const tuple = cloneVatBreakdownEvidencePrototype_(sourceTuple);
+    const tupleOrders = {};
+    const componentNames = ["rate", "taxableBase", "vatAmount", "total"];
+    let invalid = false;
+
+    if (!hasObservedTextPrototype_(tuple.evidenceId)) {
+      conflicts.push({
+        code: "INVALID_VAT_BREAKDOWN_EVIDENCE",
+        rowOrder: null,
+      });
+      invalid = true;
+    } else if (seenEvidenceIds[tuple.evidenceId]) {
+      conflicts.push({
+        code: "DUPLICATE_VAT_BREAKDOWN_EVIDENCE_ID",
+        rowOrder: null,
+      });
+      invalid = true;
+    } else {
+      seenEvidenceIds[tuple.evidenceId] = true;
+    }
+
+    if (
+      tuple.sourceLineOrders.length === 0 ||
+      tuple.sourceLineOrders.some(function (order, index) {
+        if (!Number.isInteger(order) || order <= 0 ||
+            tuple.sourceLineOrders.indexOf(order) !== index) {
+          return true;
+        }
+        tupleOrders[order] = true;
+        const sourceLine = observationByOrder[order];
+        return !sourceLine || sourceLine.roleEvidence !== "summary";
+      })
+    ) {
+      conflicts.push({
+        code: "INVALID_VAT_BREAKDOWN_SOURCE_LINE",
+        rowOrder: null,
+      });
+      invalid = true;
+    }
+
+    if (
+      !isVatBreakdownRateTextPrototype_(tuple.rateText) ||
+      !isVatBreakdownAmountTextPrototype_(tuple.taxableBaseText) ||
+      !isVatBreakdownAmountTextPrototype_(tuple.vatAmountText) ||
+      !isVatBreakdownAmountTextPrototype_(tuple.totalText) ||
+      tuple.reportedScopeEvidence !== "document" ||
+      ["inclVAT", null].indexOf(tuple.totalVatBasisEvidence) < 0 ||
+      tuple.associationEvidence !== "explicit_vat_summary_relationship"
+    ) {
+      conflicts.push({
+        code: "INVALID_VAT_BREAKDOWN_EVIDENCE",
+        rowOrder: null,
+      });
+      invalid = true;
+    }
+
+    const expectedComponentText = {
+      rate: tuple.rateText,
+      taxableBase: tuple.taxableBaseText,
+      vatAmount: tuple.vatAmountText,
+      total: tuple.totalText,
+    };
+    const usedOrders = {};
+    const usedFragments = {};
+    componentNames.forEach(function (componentName) {
+      const provenance = tuple.componentProvenance[componentName];
+      const sourceLine = provenance &&
+        observationByOrder[provenance.sourceLineOrder];
+      const fragmentKey = provenance
+        ? String(provenance.sourceLineOrder) + "\n" +
+          String(provenance.valueText)
+        : "";
+      if (
+        !provenance || !tupleOrders[provenance.sourceLineOrder] ||
+        provenance.valueText !== expectedComponentText[componentName] ||
+        !sourceLine || sourceLine.roleEvidence !== "summary" ||
+        sourceLine.rawText.indexOf(provenance.valueText) < 0 ||
+        sourceLine.rawText.indexOf(provenance.valueText) !==
+          sourceLine.rawText.lastIndexOf(provenance.valueText) ||
+        usedFragments[fragmentKey]
+      ) {
+        conflicts.push({
+          code: "AMBIGUOUS_VAT_BREAKDOWN_PROVENANCE",
+          rowOrder: provenance ? provenance.sourceLineOrder : null,
+        });
+        invalid = true;
+        return;
+      }
+      usedFragments[fragmentKey] = true;
+      usedOrders[provenance.sourceLineOrder] = true;
+    });
+    if (tuple.sourceLineOrders.some(function (order) {
+      return !usedOrders[order];
+    })) {
+      conflicts.push({
+        code: "AMBIGUOUS_VAT_BREAKDOWN_ASSOCIATION",
+        rowOrder: null,
+      });
+      invalid = true;
+    }
+
+    tuple.sourceLineOrders.forEach(function (order) {
+      if (reserved[order] || seenTupleOrders[order]) {
+        conflicts.push({
+          code: "OVERLAPPING_VAT_BREAKDOWN_PROVENANCE",
+          rowOrder: order,
+        });
+        invalid = true;
+      }
+    });
+
+    if (!invalid) {
+      tuple.sourceLineOrders.forEach(function (order) {
+        reserved[order] = true;
+        seenTupleOrders[order] = true;
+      });
+      validated.push(tuple);
+    }
+  });
+
+  return {
+    vatBreakdowns: validated,
+    conflicts: conflicts,
+  };
+}
+
+function cloneVatBreakdownEvidencePrototype_(sourceTuple) {
+  const tuple = sourceTuple && typeof sourceTuple === "object" &&
+      !Array.isArray(sourceTuple)
+    ? sourceTuple
+    : {};
+  const sourceProvenance =
+    tuple.componentProvenance &&
+    typeof tuple.componentProvenance === "object" &&
+    !Array.isArray(tuple.componentProvenance)
+      ? tuple.componentProvenance
+      : {};
+  const componentProvenance = {};
+  ["rate", "taxableBase", "vatAmount", "total"].forEach(function (name) {
+    const source =
+      sourceProvenance[name] && typeof sourceProvenance[name] === "object" &&
+      !Array.isArray(sourceProvenance[name])
+        ? sourceProvenance[name]
+        : null;
+    componentProvenance[name] = source
+      ? {
+          sourceLineOrder: source.sourceLineOrder,
+          valueText: source.valueText,
+        }
+      : null;
+  });
+  return {
+    evidenceId: tuple.evidenceId,
+    sourceLineOrders: Array.isArray(tuple.sourceLineOrders)
+      ? tuple.sourceLineOrders.slice()
+      : [],
+    rateText: tuple.rateText,
+    taxableBaseText: tuple.taxableBaseText,
+    vatAmountText: tuple.vatAmountText,
+    totalText: tuple.totalText,
+    reportedScopeEvidence: tuple.reportedScopeEvidence,
+    totalVatBasisEvidence:
+      tuple.totalVatBasisEvidence === undefined
+        ? null
+        : tuple.totalVatBasisEvidence,
+    componentProvenance: componentProvenance,
+    associationEvidence: tuple.associationEvidence,
+  };
+}
+
+function isVatBreakdownRateTextPrototype_(value) {
+  if (!hasObservedTextPrototype_(value)) return false;
+  const match = /^(\d{1,3})(?:[.,](\d{1,2}))?%$/.exec(value.trim());
+  if (!match) return false;
+  const basisPoints = Number(match[1]) * 100 +
+    Number((match[2] || "").padEnd(2, "0") || 0);
+  return basisPoints > 0 && basisPoints <= 10000;
+}
+
+function isVatBreakdownAmountTextPrototype_(value) {
+  return hasObservedTextPrototype_(value) &&
+    /^\d{1,6}[.,]\d{2}$/.test(value.trim());
 }
 
 function validateOneSummaryEvidencePrototype_(

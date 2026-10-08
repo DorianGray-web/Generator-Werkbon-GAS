@@ -43,8 +43,8 @@ const QUNIT_STAGED_BATCH_PARTITION = [
   {
     batchName: "staged-selector-harness",
     testNamePrefixes: ["QUnit selector —"],
-    expectedTestCount: 8,
-    expectedAssertionCount: 35,
+    expectedTestCount: 9,
+    expectedAssertionCount: 51,
   },
   {
     batchName: "staged-prototype-candidate",
@@ -53,14 +53,14 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "staged candidate experiment —",
       "aggregate reconciliation blind spot —",
     ],
-    expectedTestCount: 31,
-    expectedAssertionCount: 232,
+    expectedTestCount: 32,
+    expectedAssertionCount: 240,
   },
   {
     batchName: "staged-financial-evidence",
     testNamePrefixes: ["financial evidence —"],
-    expectedTestCount: 16,
-    expectedAssertionCount: 16,
+    expectedTestCount: 18,
+    expectedAssertionCount: 18,
   },
   {
     batchName: "staged-image-integration",
@@ -68,8 +68,8 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "staged image integration —",
       "staged production-path diagnostic —",
     ],
-    expectedTestCount: 28,
-    expectedAssertionCount: 28,
+    expectedTestCount: 32,
+    expectedAssertionCount: 32,
   },
   {
     batchName: "staged-stage1-diagnostics",
@@ -78,8 +78,8 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "Stage-1-v3 contract",
       "Stage-1-v3 projection",
     ],
-    expectedTestCount: 25,
-    expectedAssertionCount: 128,
+    expectedTestCount: 29,
+    expectedAssertionCount: 169,
   },
   {
     batchName: "staged-stage1-request-diagnostics",
@@ -157,6 +157,59 @@ const QUNIT_FINANCIAL_BATCH_PARTITION = [
     expectedAssertionCount: 81,
   },
 ];
+const QUNIT_OTHER_BATCH_INVENTORY = Object.freeze({
+  "legacy-production": { expectedTestCount: 56, expectedAssertionCount: 144 },
+  "canonical-release": { expectedTestCount: 30, expectedAssertionCount: 140 },
+  "pdf-merge": { expectedTestCount: 7, expectedAssertionCount: 14 },
+  "image-pdf-adapter": { expectedTestCount: 17, expectedAssertionCount: 50 },
+  "pdf-package-builder": { expectedTestCount: 17, expectedAssertionCount: 39 },
+  "werkbon-export-integration": { expectedTestCount: 11, expectedAssertionCount: 43 },
+});
+
+function getQUnitExpectedBatchInventory_(batchName) {
+  const matches = QUNIT_STAGED_BATCH_PARTITION
+    .concat(QUNIT_FINANCIAL_BATCH_PARTITION)
+    .filter(function (partition) {
+      return partition.batchName === batchName;
+    });
+  const other = Object.prototype.hasOwnProperty.call(
+    QUNIT_OTHER_BATCH_INVENTORY, batchName,
+  ) ? QUNIT_OTHER_BATCH_INVENTORY[batchName] : null;
+  if (matches.length + Number(Boolean(other)) !== 1) {
+    throw new Error("Invalid authoritative QUnit batch inventory: " + batchName);
+  }
+  const entry = other || matches[0];
+  return {
+    batchName: batchName,
+    expectedTestCount: entry.expectedTestCount,
+    expectedAssertionCount: entry.expectedAssertionCount,
+  };
+}
+
+function validateQUnitExpectedBatchInventory_() {
+  const ownedNames = QUNIT_STAGED_BATCH_PARTITION
+    .concat(QUNIT_FINANCIAL_BATCH_PARTITION)
+    .map(function (partition) { return partition.batchName; })
+    .concat(Object.keys(QUNIT_OTHER_BATCH_INVENTORY));
+  if (
+    QUNIT_BATCH_NAMES.length !== 22 ||
+    new Set(QUNIT_BATCH_NAMES).size !== QUNIT_BATCH_NAMES.length ||
+    ownedNames.length !== QUNIT_BATCH_NAMES.length ||
+    new Set(ownedNames).size !== ownedNames.length ||
+    ownedNames.some(function (name) {
+      return QUNIT_BATCH_NAMES.indexOf(name) < 0;
+    }) ||
+    QUNIT_BATCH_NAMES.some(function (name) {
+      const entry = getQUnitExpectedBatchInventory_(name);
+      return !Number.isInteger(entry.expectedTestCount) ||
+        entry.expectedTestCount <= 0 ||
+        !Number.isInteger(entry.expectedAssertionCount) ||
+        entry.expectedAssertionCount <= 0;
+    })
+  ) {
+    throw new Error("Invalid authoritative QUnit batch inventory.");
+  }
+}
 const QUNIT_DIAGNOSTIC_TESTS = {
   "collector-wiska": {
     batchName: "financial-collector",
@@ -222,9 +275,9 @@ function validatePermanentStagedPartition_(registrations) {
     parameter: { batch: "staged-core" },
   });
   if (
-    registrations.length !== 151 ||
-    new Set(names).size !== 151 ||
-    expectedAssertionTotal !== 737 ||
+    registrations.length !== 163 ||
+    new Set(names).size !== 163 ||
+    expectedAssertionTotal !== 808 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -366,6 +419,7 @@ function doGet(options) {
     }
     return buildQUnitBatchLauncher_(selection);
   }
+  validateQUnitExpectedBatchInventory_();
 
   QUnitGS2.init();
   QUnit.config.filter = selection.testFilter;
@@ -443,6 +497,63 @@ function doGet(options) {
       assert.equal(selection.batchName, "legacy-production");
       assert.equal(selection.diagnosticName, "");
       assert.equal(selection.testFilter, "");
+    },
+  );
+
+  QUnit.test(
+    "QUnit selector — diagnostic inventory requires complete bounded assertion evidence",
+    function (assert) {
+      function report(events) {
+        return JSON.parse(buildQUnitDiagnosticReport(
+          JSON.stringify(events), "pdf-merge",
+        ));
+      }
+      function fixture(tests, assertions, failures, completed) {
+        return buildSyntheticQUnitInventoryResults_(
+          tests, assertions, failures, completed,
+        );
+      }
+
+      assert.equal(report(fixture(7, 14, 0, true)).status, "PASS");
+      assert.equal(report(fixture(6, 14, 0, true)).status,
+        "RUNTIME_INVENTORY_MISMATCH");
+      assert.equal(report(fixture(7, 13, 0, true)).status,
+        "RUNTIME_INVENTORY_MISMATCH");
+      assert.equal(report(fixture(8, 14, 0, true)).status,
+        "RUNTIME_INVENTORY_MISMATCH");
+      assert.equal(report(fixture(7, 14, 1, true)).status, "TEST_FAILURE");
+      assert.equal(report(fixture(7, 14, 0, false)).status,
+        "INCOMPLETE_REPORT");
+      assert.equal(JSON.parse(buildQUnitDiagnosticReport("{", "pdf-merge")).status,
+        "INCOMPLETE_REPORT");
+      assert.equal(report([]).status, "INCOMPLETE_REPORT");
+
+      const noAssertions = fixture(7, 14, 0, true);
+      noAssertions.forEach(function (event) {
+        if (event.type === "TESTS_RESULTS_ONE") event.value.assertions = [];
+      });
+      assert.equal(report(noAssertions).status, "INCOMPLETE_REPORT");
+
+      const partialAssertions = fixture(7, 14, 0, true);
+      partialAssertions[0].value.assertions.pop();
+      assert.equal(report(partialAssertions).status, "INCOMPLETE_REPORT");
+
+      const missingArray = fixture(7, 14, 0, true);
+      delete missingArray[0].value.assertions;
+      assert.equal(report(missingArray).status, "INCOMPLETE_REPORT");
+
+      const oversizedNames = fixture(11, 22, 11, true);
+      oversizedNames.forEach(function (event) {
+        if (event.type === "TESTS_RESULTS_ONE") {
+          event.value.results.name = "X".repeat(10000);
+        }
+      });
+      const boundedReport = report(oversizedNames);
+      assert.equal(boundedReport.status, "RUNTIME_INVENTORY_MISMATCH");
+      assert.equal(boundedReport.failedTests[0].name, "[redacted]");
+      assert.equal(boundedReport.failedTests.length, 10);
+      assert.equal(boundedReport.omittedFailedTests, 1);
+      assert.ok(JSON.stringify(boundedReport).length < 2000);
     },
   );
 
@@ -3289,6 +3400,23 @@ function doGet(options) {
     };
   }
 
+  function phantomCountHuboStage1V2Fixture() {
+    const evidence = controlledHuboOneItemStage1V2Fixture();
+    evidence.observedLines = evidence.observedLines.slice(1, 4);
+    evidence.observedLines[0].rawText =
+      "1 Veilig v. slot €/stuk 96,99 96,99";
+    evidence.observedLines[0].descriptionText = "Veilig v. slot";
+    evidence.observedLines[0].unitPriceText = "€/stuk 96,99";
+    evidence.observedLines[0].lineTotalText = "96,99";
+    evidence.observedLines[1].rawText = "pc72 skg2";
+    evidence.observedLines[1].descriptionText = "pc72 skg2";
+    evidence.observedLines[2].rawText = "Totaal 96,99";
+    evidence.observedLines[2].lineTotalText = "96,99";
+    evidence.summaryEvidence.printedTotal.rawText = "Totaal 96,99";
+    evidence.summaryEvidence.printedTotal.valueText = "96,99";
+    return evidence;
+  }
+
   function syntheticFinancialObservation(
     evidenceId,
     sourceLineOrder,
@@ -3362,6 +3490,161 @@ function doGet(options) {
         },
       },
     );
+  }
+
+  function syntheticHuboVatSummaryExtraction() {
+    const extraction = observedPrototypeExtraction(
+      [
+        observedPrototypeRow(1, "Material A", "1", "27,99", "27,99", "left_aligned"),
+        observedPrototypeRow(2, "Material B", "1", "13,49", "13,49", "left_aligned"),
+        observedPrototypeRow(3, "Material C", "1", "5,99", "5,99", "left_aligned"),
+        observedPrototypeRow(4, "Material D", "1", "0,80", "0,80", "left_aligned"),
+        observedPrototypeEvidenceLine(5, "Netto 39,89", "summary"),
+        observedPrototypeEvidenceLine(6, "BTW 8,38", "summary"),
+        observedPrototypeEvidenceLine(7, "TOTAAL 48,27", "summary"),
+      ],
+      {
+        printedProductCount: null,
+        printedTotal: {
+          sourceLineOrder: 7, rawText: "TOTAAL 48,27", labelText: "TOTAAL",
+          valueText: "48,27", totalTypeEvidence: null,
+        },
+      },
+    );
+    extraction.financialEvidence = {
+      monetaryObservations: [
+        syntheticFinancialObservation(
+          "summary-netto-5", 5, "Netto", "39,89", "document_total", "exclVAT",
+        ),
+        syntheticFinancialObservation(
+          "summary-btw-6", 6, "BTW", "8,38", "vat_amount", null,
+        ),
+      ],
+    };
+    return extraction;
+  }
+
+  function capturedDevStage1CombinedFinancialRowFixture() {
+    const observedLines = [
+      "product", "product", "product", "product", "product", "product",
+      "product", "product", "summary", "informational", "informational",
+      "summary", "summary",
+    ].map(function (roleEvidence, index) {
+      const order = index + 1;
+      const pricedProduct = order <= 8 && order % 2 === 1;
+      return {
+        order: order,
+        rawText: "Synthetic " + roleEvidence + " line " + order,
+        leadingQuantityText: pricedProduct ? "1" : null,
+        descriptionText: "Synthetic line " + order,
+        unitPriceText: pricedProduct ? "1,00" : null,
+        lineTotalText: pricedProduct || roleEvidence === "informational"
+          ? "1,00"
+          : null,
+        indentation: order <= 8 && order % 2 === 0
+          ? "indented"
+          : "left_aligned",
+        roleEvidence: roleEvidence,
+      };
+    });
+    observedLines[8] = {
+      order: 9,
+      rawText: "TOTAAL 48,27",
+      leadingQuantityText: null,
+      descriptionText: "TOTAAL",
+      unitPriceText: null,
+      lineTotalText: "48,27",
+      indentation: "left_aligned",
+      roleEvidence: "summary",
+    };
+    observedLines[11] = {
+      order: 12,
+      rawText: "21,00% BTW van 39,89 8,38 48,27",
+      leadingQuantityText: null,
+      descriptionText: "21,00% BTW van",
+      unitPriceText: "39,89",
+      lineTotalText: "8,38 48,27",
+      indentation: "left_aligned",
+      roleEvidence: "summary",
+    };
+    observedLines[12] = {
+      order: 13,
+      rawText: "Totaal BTW van 39,89 8,38 48,27",
+      leadingQuantityText: null,
+      descriptionText: "Totaal BTW van",
+      unitPriceText: "39,89",
+      lineTotalText: "8,38 48,27",
+      indentation: "left_aligned",
+      roleEvidence: "summary",
+    };
+    return {
+      observedLines: observedLines,
+      summaryEvidence: {
+        printedProductCount: null,
+        printedTotal: {
+          sourceLineOrder: 9,
+          rawText: "TOTAAL 48,27",
+          labelText: "TOTAAL",
+          valueText: "48,27",
+          totalTypeEvidence: null,
+        },
+      },
+      financialEvidence: {
+        monetaryObservations: [
+          {
+            evidenceId: "1",
+            sourceLineOrders: [12],
+            rawText: "21,00% BTW van 39,89 8,38 48,27",
+            labelText: "21,00% BTW van",
+            valueText: "8,38",
+            reportedMeaningEvidence: "vat_amount",
+            reportedVatBasisEvidence: null,
+            reportedScopeEvidence: "document",
+          },
+        ],
+      },
+    };
+  }
+
+  function completeVatBreakdownTupleFixture() {
+    const evidence = capturedDevStage1CombinedFinancialRowFixture();
+    [
+      [1, "27,99"],
+      [3, "13,49"],
+      [5, "5,99"],
+      [7, "0,80"],
+    ].forEach(function (specification) {
+      const line = evidence.observedLines[specification[0] - 1];
+      line.rawText = "1 Synthetic item " + specification[0] + " " +
+        specification[1] + " " + specification[1];
+      line.leadingQuantityText = "1";
+      line.descriptionText = "Synthetic item " + specification[0];
+      line.unitPriceText = specification[1];
+      line.lineTotalText = specification[1];
+    });
+    evidence.financialEvidence = {
+      monetaryObservations: [],
+      vatBreakdowns: [
+        {
+          evidenceId: "vat-breakdown-12-13",
+          sourceLineOrders: [12, 13],
+          rateText: "21,00%",
+          taxableBaseText: "39,89",
+          vatAmountText: "8,38",
+          totalText: "48,27",
+          reportedScopeEvidence: "document",
+          totalVatBasisEvidence: "inclVAT",
+          componentProvenance: {
+            rate: { sourceLineOrder: 12, valueText: "21,00%" },
+            taxableBase: { sourceLineOrder: 12, valueText: "39,89" },
+            vatAmount: { sourceLineOrder: 12, valueText: "8,38" },
+            total: { sourceLineOrder: 13, valueText: "48,27" },
+          },
+          associationEvidence: "explicit_vat_summary_relationship",
+        },
+      ],
+    };
+    return evidence;
   }
 
   function financialConflictCodes(financialEvidence) {
@@ -4583,6 +4866,62 @@ function doGet(options) {
   );
 
   QUnit.test(
+    "financial evidence — linked Netto BTW and bare Totaal release typed totals",
+    function (assert) {
+      const result = buildStagedReceiptCandidateExperiment(
+        syntheticHuboVatSummaryExtraction(),
+      );
+      assert.ok(compactJsonEquality({
+        structural: result.structuralStatus.resolved,
+        conflicts: result.structuralStatus.conflicts,
+        financial: result.financialStatus,
+        targets: result.financialEvidence.canonicalAssignments.map(function (item) {
+          return item.canonicalTarget;
+        }),
+        totals: result.canonicalReceipt && result.canonicalReceipt.totals,
+        vat: result.canonicalReceipt && result.canonicalReceipt.vat,
+      }, {
+        structural: true,
+        conflicts: [],
+        financial: { resolved: true, code: "FINANCIAL_EVIDENCE_RESOLVED" },
+        targets: ["totals.exclVAT", "totals.inclVAT", "totals.vatAmount"],
+        totals: { exclVAT: 39.89, inclVAT: 48.27, vatAmount: 8.38 },
+        vat: { rate: null, amount: 8.38 },
+      }));
+    },
+  );
+
+  QUnit.test(
+    "financial evidence — contradictory Netto BTW and Totaal fail closed",
+    function (assert) {
+      const source = syntheticHuboVatSummaryExtraction();
+      source.observedLines[6].rawText = "TOTAAL 49,27";
+      source.summaryEvidence.printedTotal.rawText = "TOTAAL 49,27";
+      source.summaryEvidence.printedTotal.valueText = "49,27";
+      const result = buildStagedReceiptCandidateExperiment(source);
+      source.summaryEvidence.printedTotal.totalTypeEvidence = "inclVAT";
+      const typedResult = buildStagedReceiptCandidateExperiment(source);
+      assert.ok(compactJsonEquality({
+        status: result.financialStatus,
+        conflictCodes: financialConflictCodes(result.financialEvidence),
+        canonical: result.canonicalReceipt,
+        typedStatus: typedResult.financialStatus,
+        typedCanonical: typedResult.canonicalReceipt,
+      }, {
+        status: { resolved: false, code: "CONTRADICTORY_VAT_SUMMARY" },
+        conflictCodes: [
+          "AMBIGUOUS_PRINTED_TOTAL_TYPE",
+          "CONTRADICTORY_VAT_SUMMARY",
+          "FINANCIAL_EVIDENCE_MISMATCH",
+        ],
+        canonical: null,
+        typedStatus: { resolved: false, code: "CONTRADICTORY_VAT_SUMMARY" },
+        typedCanonical: null,
+      }));
+    },
+  );
+
+  QUnit.test(
     "financial evidence — multiple linked synthetic summaries pass the full experimental gate",
     function (assert) {
       const extraction = observedPrototypeExtraction(
@@ -5258,6 +5597,40 @@ function doGet(options) {
   );
 
   QUnit.test(
+    "staged image integration — explicit VAT summary reaches final receipt row",
+    function (assert) {
+      const canonical = buildStagedCanonicalReceiptOrThrow_(
+        syntheticHuboVatSummaryExtraction(),
+      );
+      const normalized = normalizeAndAggregateReceiptData(canonical);
+      const written = [];
+      const sheet = {
+        getLastRow: function () { return 1; },
+        getRange: function () {
+          return { setValues: function (rows) { written.push.apply(written, rows); } };
+        },
+      };
+      replaceMaterialsForWerkbon(
+        sheet, "SYNTHETIC-BON", normalized.rows, "synthetic-receipt",
+        normalized.documentTotalInclVat,
+      );
+      assert.ok(compactJsonEquality({
+        canonicalTotals: canonical.totals,
+        documentTotalInclVat: normalized.documentTotalInclVat,
+        reconciled: normalized.reconciled,
+        rowCount: written.length,
+        columnG: written.map(function (row) { return row[6]; }),
+      }, {
+        canonicalTotals: { exclVAT: 39.89, inclVAT: 48.27, vatAmount: 8.38 },
+        documentTotalInclVat: 48.27,
+        reconciled: true,
+        rowCount: 4,
+        columnG: ["", "", "", 48.27],
+      }));
+    },
+  );
+
+  QUnit.test(
     "staged image integration — plain-total forward anchors use bounded canonical release",
     function (assert) {
       const canonical = buildStagedCanonicalReceiptOrThrow_(
@@ -5369,6 +5742,149 @@ function doGet(options) {
           total: 16.17,
         },
       ));
+    },
+  );
+
+  QUnit.test(
+    "staged image integration — phantom optional count is excluded without changing source evidence",
+    function (assert) {
+      const evidence = phantomCountHuboStage1V2Fixture();
+      const original = JSON.stringify(evidence);
+      const strictCandidate = buildStagedReceiptCandidateExperiment(evidence);
+      const candidate = buildStagedReceiptCandidate(evidence);
+      const canonical = buildStagedCanonicalReceiptOrThrow_(evidence);
+      const normalized = normalizeAndAggregateReceiptData(canonical);
+      const written = [];
+      const sheet = {
+        getLastRow: function () { return 1; },
+        getRange: function () {
+          return {
+            setValues: function (rows) {
+              written.push.apply(written, rows);
+            },
+          };
+        },
+      };
+      replaceMaterialsForWerkbon(
+        sheet,
+        "SYNTHETIC-BON",
+        normalized.rows,
+        "synthetic-didam-receipt",
+        normalized.documentTotalInclVat,
+      );
+
+      assert.deepEqual({
+        strictResolved: strictCandidate.structuralStatus.resolved,
+        strictConflicts: strictCandidate.structuralStatus.conflicts.map(
+          function (conflict) { return conflict.code; },
+        ),
+        sourceUnchanged: JSON.stringify(evidence) === original,
+        candidateResolved: candidate.structuralStatus.resolved,
+        candidateCount: candidate.evidenceTrace.summaryEvidence.printedProductCount,
+        printedTotal: candidate.evidenceTrace.summaryEvidence.printedTotal,
+        originalObservations: candidate.evidenceTrace.originalObservations,
+        productSources: candidate.evidenceTrace.candidateItemSources[0].sourceRowOrders,
+        hasPrintedNetto: evidence.observedLines.some(function (line) {
+          return /\bNetto\b/i.test(line.rawText);
+        }),
+        hasPrintedBtw: evidence.observedLines.some(function (line) {
+          return /\bBTW\b/i.test(line.rawText);
+        }),
+        financialObservationCount: evidence.financialEvidence &&
+          evidence.financialEvidence.monetaryObservations
+          ? evidence.financialEvidence.monetaryObservations.length : 0,
+        canonicalInclVat: canonical.totals && canonical.totals.inclVAT,
+        canonicalLineTotal: canonical.items[0].lineTotal,
+        materialRowTotal: normalized.rows[0].quantity * normalized.rows[0].price,
+        finalSum: normalized.finalSum,
+        documentTotalInclVat: normalized.documentTotalInclVat,
+        columnG: written.map(function (row) { return row[6]; }),
+      }, {
+        strictResolved: false,
+        strictConflicts: [
+          "INVALID_SUMMARY_SOURCE_LINE",
+          "INCONSISTENT_SUMMARY_RAW_VALUE",
+        ],
+        sourceUnchanged: true,
+        candidateResolved: true,
+        candidateCount: null,
+        printedTotal: evidence.summaryEvidence.printedTotal,
+        originalObservations: evidence.observedLines,
+        productSources: [2, 3],
+        hasPrintedNetto: false,
+        hasPrintedBtw: false,
+        financialObservationCount: 0,
+        canonicalInclVat: null,
+        canonicalLineTotal: 96.99,
+        materialRowTotal: 96.99,
+        finalSum: 96.99,
+        documentTotalInclVat: 0,
+        columnG: [""],
+      });
+    },
+  );
+
+  QUnit.test(
+    "staged image integration — existing wrong-role count pointer still rejects",
+    function (assert) {
+      const evidence = phantomCountHuboStage1V2Fixture();
+      evidence.summaryEvidence.printedProductCount.sourceLineOrder = 2;
+      const candidate = buildStagedReceiptCandidate(evidence);
+      const visibleCountEvidence = phantomCountHuboStage1V2Fixture();
+      const countRow = observedPrototypeEvidenceLine(
+        6,
+        "Aantal producten: 2",
+        "informational",
+      );
+      visibleCountEvidence.observedLines.push(countRow);
+      const visibleCountCandidate = buildStagedReceiptCandidate(
+        visibleCountEvidence,
+      );
+      const invalidTotalEvidence = phantomCountHuboStage1V2Fixture();
+      invalidTotalEvidence.summaryEvidence.printedTotal.sourceLineOrder = 99;
+      const invalidTotalCandidate = buildStagedReceiptCandidate(
+        invalidTotalEvidence,
+      );
+      const unrelatedConflictEvidence = phantomCountHuboStage1V2Fixture();
+      unrelatedConflictEvidence.observedLines[1].roleEvidence = "unknown";
+      const unrelatedConflictCandidate = buildStagedReceiptCandidate(
+        unrelatedConflictEvidence,
+      );
+
+      assert.deepEqual({
+        resolved: candidate.structuralStatus.resolved,
+        invalidCountPointer: candidate.structuralStatus.conflicts.some(
+          function (conflict) {
+            return conflict.code === "INVALID_SUMMARY_SOURCE_LINE" &&
+              conflict.field === "printedProductCount" &&
+              conflict.rowOrder === 2;
+          },
+        ),
+        retainedCount: candidate.evidenceTrace.summaryEvidence.printedProductCount,
+        visibleCountResolved: visibleCountCandidate.structuralStatus.resolved,
+        visibleCountRetained:
+          visibleCountCandidate.evidenceTrace.summaryEvidence.printedProductCount,
+        invalidTotalResolved: invalidTotalCandidate.structuralStatus.resolved,
+        invalidTotalCountRetained:
+          invalidTotalCandidate.evidenceTrace.summaryEvidence.printedProductCount,
+        unrelatedConflictResolved:
+          unrelatedConflictCandidate.structuralStatus.resolved,
+        unrelatedConflictCountRetained:
+          unrelatedConflictCandidate.evidenceTrace.summaryEvidence.printedProductCount,
+      }, {
+        resolved: false,
+        invalidCountPointer: true,
+        retainedCount: evidence.summaryEvidence.printedProductCount,
+        visibleCountResolved: false,
+        visibleCountRetained:
+          visibleCountEvidence.summaryEvidence.printedProductCount,
+        invalidTotalResolved: false,
+        invalidTotalCountRetained:
+          invalidTotalEvidence.summaryEvidence.printedProductCount,
+        unrelatedConflictResolved: false,
+        unrelatedConflictCountRetained:
+          unrelatedConflictEvidence.summaryEvidence.printedProductCount,
+      });
     },
   );
 
@@ -10420,6 +10936,548 @@ function doGet(options) {
   );
 
   QUnit.test(
+    "Stage-1-v2 diagnostic parser — retains explicit Netto BTW and Totaal lines",
+    function (assert) {
+      const source = syntheticHuboVatSummaryExtraction();
+      const parsed = parseOpenAIStage1V2Response_(
+        createMockOpenAIResponse(JSON.stringify(source)),
+      );
+      assert.ok(compactJsonEquality({
+        financialRows: parsed.observedLines.slice(4).map(function (line) {
+          return [line.order, line.rawText, line.roleEvidence];
+        }),
+        observations: parsed.financialEvidence.monetaryObservations,
+        printedTotal: parsed.summaryEvidence.printedTotal,
+        schemaRequiresFinancialEvidence:
+          buildStage1V2JsonSchema_().required.indexOf("financialEvidence") >= 0,
+      }, {
+        financialRows: [
+          [5, "Netto 39,89", "summary"],
+          [6, "BTW 8,38", "summary"],
+          [7, "TOTAAL 48,27", "summary"],
+        ],
+        observations: source.financialEvidence.monetaryObservations,
+        printedTotal: source.summaryEvidence.printedTotal,
+        schemaRequiresFinancialEvidence: true,
+      }));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v2 diagnostic parser — captured combined VAT row rejects during label recovery",
+    function (assert) {
+      const evidence = capturedDevStage1CombinedFinancialRowFixture();
+      const observation = evidence.financialEvidence.monetaryObservations[0];
+      const sourceLine = evidence.observedLines.filter(function (line) {
+        return line.order === observation.sourceLineOrders[0];
+      })[0];
+      const exactRejectionMessage =
+        "Stage-1-v2 financialEvidence.monetaryObservations[0] " +
+        "has unsupported financial meaning.";
+      function captureThrownError(operation) {
+        let caught = null;
+        try {
+          operation();
+        } catch (error) {
+          caught = error;
+        }
+        return {
+          thrown: caught instanceof Error,
+          name: caught && caught.name,
+          message: caught && caught.message,
+        };
+      }
+
+      assert.equal(evidence.observedLines.length, 13);
+      assert.equal(observation.reportedMeaningEvidence, "vat_amount");
+      assert.equal(observation.labelText, "21,00% BTW van");
+      assert.ok(compactJsonEquality(observation.sourceLineOrders, [12]));
+      assert.ok(
+        sourceLine.roleEvidence === "summary" &&
+          sourceLine.rawText === observation.rawText,
+      );
+      assert.equal(
+        (sourceLine.rawText.match(/\d{1,6}[.,]\d{2}/g) || []).length,
+        4,
+      );
+      assert.ok(compactJsonEquality(captureThrownError(function () {
+        recoverStage1V2KnownMonetaryLabel_(
+          observation,
+          evidence,
+          "financialEvidence.monetaryObservations[0]",
+        );
+      }), {
+        thrown: true,
+        name: "Error",
+        message: exactRejectionMessage,
+      }));
+      assert.ok(compactJsonEquality(captureThrownError(function () {
+        parseOpenAIStage1V2Response_(
+          createMockOpenAIResponse(JSON.stringify(evidence)),
+        );
+      }), {
+        thrown: true,
+        name: "Error",
+        message: exactRejectionMessage,
+      }));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v2 diagnostic parser — validates bounded VAT breakdown tuples",
+    function (assert) {
+      const fixture = completeVatBreakdownTupleFixture();
+      const schema = buildStage1V2JsonSchema_();
+      const prompt = buildOpenAIStage1V2Payload_(
+        "image/jpeg",
+        "synthetic-base64",
+      ).messages[0].content[0].text;
+      const representationDecisionIndex = prompt.indexOf(
+        "First inspect the complete financial summary",
+      );
+      const atomicFallbackIndex = prompt.indexOf(
+        "Only if no complete explicit VAT-summary relationship exists",
+      );
+      const parsed = parseOpenAIStage1V2Response_(
+        createMockOpenAIResponse(JSON.stringify(fixture)),
+      );
+      function changed(change) {
+        const evidence = JSON.parse(JSON.stringify(fixture));
+        change(evidence);
+        return function () {
+          return parseOpenAIStage1V2Response_(
+            createMockOpenAIResponse(JSON.stringify(evidence)),
+          );
+        };
+      }
+
+      assert.ok(
+        schema.properties.financialEvidence.required.indexOf(
+          "vatBreakdowns",
+        ) >= 0 &&
+          schema.properties.financialEvidence.properties.vatBreakdowns
+            .items.properties.sourceLineOrders.minItems === 1 &&
+          !Object.prototype.hasOwnProperty.call(
+            schema.properties.financialEvidence.properties.vatBreakdowns
+              .items.properties.sourceLineOrders,
+            "uniqueItems",
+          ),
+      );
+      assert.ok(
+        prompt.indexOf("explicit VAT summary relationship") >= 0 &&
+          prompt.indexOf("Do not infer a VAT breakdown") >= 0 &&
+          prompt.indexOf(
+            "one explicit financial meaning tied to one amount",
+          ) >= 0 &&
+          prompt.indexOf(
+            "does not require the literal label \"Netto\"",
+          ) >= 0 &&
+          prompt.indexOf('wording such as "BTW van"') >= 0 &&
+          prompt.indexOf(
+            "Multiple tuple components may originate from the same " +
+              "physical summary line",
+          ) >= 0 &&
+          prompt.indexOf(
+            "sourceLineOrders must contain exactly the unique " +
+              "sourceLineOrder values referenced by",
+          ) >= 0 &&
+          prompt.indexOf(
+            "Include no additional contextual summary lines",
+          ) >= 0 &&
+          prompt.indexOf(
+            "all components on line 16 means sourceLineOrders = [16]",
+          ) >= 0 &&
+          prompt.indexOf(
+            "sourceLineOrders = [12, 13]",
+          ) >= 0 &&
+          prompt.indexOf(
+            "is not atomic and must not be collapsed into one " +
+              "monetaryObservation",
+          ) >= 0 &&
+          prompt.indexOf(
+            "Do not emit that same relationship as monetaryObservations",
+          ) >= 0 &&
+          prompt.indexOf(
+            "printed VAT-summary layout visibly identifies the related total",
+          ) >= 0 &&
+          prompt.indexOf(
+            'A bare or unrelated "Totaal" label remains insufficient',
+          ) >= 0 &&
+          representationDecisionIndex >= 0 &&
+          atomicFallbackIndex > representationDecisionIndex &&
+          prompt.indexOf(
+            "before extracting any atomic financial observation",
+          ) >= 0 &&
+          prompt.indexOf(
+            "mutually exclusive representation modes",
+          ) >= 0 &&
+          prompt.indexOf("vatBreakdowns.length > 0") >= 0 &&
+          prompt.indexOf("set monetaryObservations = []") >= 0 &&
+          prompt.indexOf(
+            "monetaryObservations may be populated only when " +
+              "vatBreakdowns = []",
+          ) >= 0 &&
+          prompt.indexOf(
+            "do not perform atomic Netto or BTW extraction",
+          ) >= 0 &&
+          prompt.indexOf(
+            "do not duplicate any rate, taxable-base, VAT-amount, or " +
+              "related-total component into monetaryObservations",
+          ) >= 0,
+      );
+      assert.ok(compactJsonEquality(
+        parsed.financialEvidence.vatBreakdowns,
+        fixture.financialEvidence.vatBreakdowns,
+      ));
+      assert.equal(changed(function (evidence) {
+        evidence.financialEvidence.vatBreakdowns[0]
+          .totalVatBasisEvidence = null;
+      })().financialEvidence.vatBreakdowns[0].totalVatBasisEvidence, null);
+      assert.throws(changed(function (evidence) {
+        delete evidence.financialEvidence.vatBreakdowns[0]
+          .componentProvenance.total;
+      }), /componentProvenance/);
+      assert.throws(changed(function (evidence) {
+        evidence.financialEvidence.vatBreakdowns[0].associationEvidence =
+          "arithmetic_only";
+      }), /unsupported VAT breakdown semantics/);
+      assert.throws(changed(function (evidence) {
+        evidence.financialEvidence.vatBreakdowns[0]
+          .componentProvenance.taxableBase.valueText = "39,88";
+      }), /ambiguous component provenance/);
+      assert.throws(changed(function (evidence) {
+        evidence.financialEvidence.monetaryObservations.push(
+          syntheticFinancialObservation(
+            "overlap", 12, "BTW", "8,38", "vat_amount", null,
+          ),
+        );
+      }), /overlapping financial representations/);
+    },
+  );
+
+  QUnit.test(
+    "staged prototype — VAT breakdown tuples fail closed on invalid provenance",
+    function (assert) {
+      function changed(change) {
+        const evidence = completeVatBreakdownTupleFixture();
+        change(evidence);
+        return buildStagedReceiptCandidateExperiment(evidence);
+      }
+      function hasStructuralCode(result, code) {
+        return result.structuralStatus.conflicts.some(function (conflict) {
+          return conflict.code === code;
+        });
+      }
+
+      const missingSource = changed(function (evidence) {
+        const tuple = evidence.financialEvidence.vatBreakdowns[0];
+        tuple.sourceLineOrders[1] = 99;
+        tuple.componentProvenance.total.sourceLineOrder = 99;
+      });
+      assert.ok(!missingSource.structuralStatus.resolved &&
+        hasStructuralCode(missingSource, "INVALID_VAT_BREAKDOWN_SOURCE_LINE"));
+
+      const wrongRole = changed(function (evidence) {
+        evidence.observedLines[11].roleEvidence = "product";
+      });
+      assert.ok(!wrongRole.structuralStatus.resolved &&
+        hasStructuralCode(wrongRole, "INVALID_VAT_BREAKDOWN_SOURCE_LINE"));
+
+      const duplicateTuple = changed(function (evidence) {
+        const duplicate = JSON.parse(JSON.stringify(
+          evidence.financialEvidence.vatBreakdowns[0],
+        ));
+        duplicate.evidenceId = "vat-breakdown-duplicate";
+        evidence.financialEvidence.vatBreakdowns.push(duplicate);
+      });
+      assert.ok(!duplicateTuple.structuralStatus.resolved &&
+        hasStructuralCode(
+          duplicateTuple,
+          "OVERLAPPING_VAT_BREAKDOWN_PROVENANCE",
+        ));
+
+      const overlappingRepresentation = changed(function (evidence) {
+        evidence.financialEvidence.monetaryObservations.push(
+          syntheticFinancialObservation(
+            "overlap", 12, "BTW", "8,38", "vat_amount", null,
+          ),
+        );
+      });
+      assert.ok(!overlappingRepresentation.structuralStatus.resolved &&
+        hasStructuralCode(
+          overlappingRepresentation,
+          "DUPLICATE_FINANCIAL_EVIDENCE_REPRESENTATION",
+        ));
+
+      const ambiguousAssociation = changed(function (evidence) {
+        evidence.financialEvidence.vatBreakdowns[0]
+          .componentProvenance.total.sourceLineOrder = 12;
+      });
+      assert.ok(!ambiguousAssociation.structuralStatus.resolved &&
+        hasStructuralCode(
+          ambiguousAssociation,
+          "AMBIGUOUS_VAT_BREAKDOWN_ASSOCIATION",
+        ));
+
+      const inconsistentLiteral = changed(function (evidence) {
+        const tuple = evidence.financialEvidence.vatBreakdowns[0];
+        tuple.taxableBaseText = "39,88";
+        tuple.componentProvenance.taxableBase.valueText = "39,88";
+      });
+      assert.ok(!inconsistentLiteral.structuralStatus.resolved &&
+        hasStructuralCode(
+          inconsistentLiteral,
+          "AMBIGUOUS_VAT_BREAKDOWN_PROVENANCE",
+        ));
+
+      const arithmeticContradiction = changed(function (evidence) {
+        const tuple = evidence.financialEvidence.vatBreakdowns[0];
+        tuple.totalText = "49,27";
+        tuple.componentProvenance.total.valueText = "49,27";
+        evidence.observedLines[12].rawText =
+          evidence.observedLines[12].rawText.replace("48,27", "49,27");
+        evidence.observedLines[12].lineTotalText = "8,38 49,27";
+      });
+      assert.ok(
+        arithmeticContradiction.structuralStatus.resolved &&
+          !arithmeticContradiction.financialStatus.resolved &&
+          arithmeticContradiction.financialStatus.code ===
+            "CONTRADICTORY_VAT_BREAKDOWN",
+      );
+
+      const conflictingTuple = changed(function (evidence) {
+        const secondRateRow = JSON.parse(JSON.stringify(
+          evidence.observedLines[11],
+        ));
+        secondRateRow.order = 14;
+        secondRateRow.rawText = "21,00% BTW van 40,89 8,38 49,27";
+        secondRateRow.unitPriceText = "40,89";
+        secondRateRow.lineTotalText = "8,38 49,27";
+        const secondTotalRow = JSON.parse(JSON.stringify(
+          evidence.observedLines[12],
+        ));
+        secondTotalRow.order = 15;
+        secondTotalRow.rawText = "Totaal BTW van 40,89 8,38 49,27";
+        secondTotalRow.unitPriceText = "40,89";
+        secondTotalRow.lineTotalText = "8,38 49,27";
+        evidence.observedLines.push(secondRateRow, secondTotalRow);
+        evidence.financialEvidence.vatBreakdowns.push({
+          evidenceId: "vat-breakdown-14-15",
+          sourceLineOrders: [14, 15],
+          rateText: "21,00%",
+          taxableBaseText: "40,89",
+          vatAmountText: "8,38",
+          totalText: "49,27",
+          reportedScopeEvidence: "document",
+          totalVatBasisEvidence: "inclVAT",
+          componentProvenance: {
+            rate: { sourceLineOrder: 14, valueText: "21,00%" },
+            taxableBase: { sourceLineOrder: 14, valueText: "40,89" },
+            vatAmount: { sourceLineOrder: 14, valueText: "8,38" },
+            total: { sourceLineOrder: 15, valueText: "49,27" },
+          },
+          associationEvidence: "explicit_vat_summary_relationship",
+        });
+      });
+      assert.ok(
+        conflictingTuple.structuralStatus.resolved &&
+          !conflictingTuple.financialStatus.resolved &&
+          conflictingTuple.financialStatus.code === "CONFLICTING_TYPED_TOTALS",
+      );
+    },
+  );
+
+  QUnit.test(
+    "staged image integration — complete VAT breakdown tuple reaches final Column G",
+    function (assert) {
+      const parsed = parseOpenAIStage1V2Response_(
+        createMockOpenAIResponse(JSON.stringify(
+          completeVatBreakdownTupleFixture(),
+        )),
+      );
+      const candidate = buildStagedReceiptCandidateExperiment(parsed);
+      const normalized = normalizeAndAggregateReceiptData(
+        candidate.canonicalReceipt,
+      );
+      const written = [];
+      const sheet = {
+        getLastRow: function () { return 1; },
+        getRange: function () {
+          return {
+            setValues: function (rows) {
+              Array.prototype.push.apply(written, rows);
+            },
+          };
+        },
+      };
+      replaceMaterialsForWerkbon(
+        sheet,
+        "SYNTHETIC-BON",
+        normalized.rows,
+        "synthetic-receipt",
+        normalized.documentTotalInclVat,
+      );
+
+      assert.ok(compactJsonEquality({
+        structural: candidate.structuralStatus.resolved,
+        financial: candidate.financialStatus,
+        tupleInterpretation:
+          candidate.financialEvidence.vatBreakdownInterpretations[0],
+        totals: candidate.canonicalReceipt.totals,
+        candidateDocumentTotalInclVat: candidate.documentTotalInclVat,
+        normalizedDocumentTotalInclVat: normalized.documentTotalInclVat,
+        reconciled: normalized.reconciled,
+        columnG: written.map(function (row) { return row[6]; }),
+      }, {
+        structural: true,
+        financial: { resolved: true, code: "FINANCIAL_EVIDENCE_RESOLVED" },
+        tupleInterpretation: {
+          evidenceId: "vat-breakdown-12-13",
+          status: "resolved",
+          failureCode: null,
+          rateBasisPoints: 2100,
+          taxableBaseCents: 3989,
+          vatAmountCents: 838,
+          totalCents: 4827,
+          totalVatBasis: "inclVAT",
+          supportingEvidenceIds: ["vat-breakdown-12-13"],
+          ruleId: "EXPLICIT_VAT_BREAKDOWN_TUPLE",
+        },
+        totals: { exclVAT: null, inclVAT: 48.27, vatAmount: 8.38 },
+        candidateDocumentTotalInclVat: 48.27,
+        normalizedDocumentTotalInclVat: 48.27,
+        reconciled: true,
+        columnG: ["", "", "", 48.27],
+      }));
+    },
+  );
+
+  QUnit.test(
+    "Stage-1-v2 diagnostic parser — repairs only source-linked blank monetary labels",
+    function (assert) {
+      const source = syntheticHuboVatSummaryExtraction();
+      source.financialEvidence.monetaryObservations.forEach(function (item) {
+        item.labelText = "";
+      });
+      function parseChanged(change) {
+        const changed = JSON.parse(JSON.stringify(source));
+        change(changed);
+        return parseOpenAIStage1V2Response_(
+          createMockOpenAIResponse(JSON.stringify(changed)),
+        );
+      }
+      const parsed = parseChanged(function () {});
+      const observations = parsed.financialEvidence.monetaryObservations;
+      const candidate = buildStagedReceiptCandidateExperiment(parsed);
+
+      assert.equal(observations[0].labelText, "Netto");
+      assert.equal(observations[1].labelText, "BTW");
+      assert.ok(candidate.structuralStatus.resolved);
+      assert.ok(compactJsonEquality(candidate.canonicalReceipt.totals,
+        { exclVAT: 39.89, inclVAT: 48.27, vatAmount: 8.38 }));
+      assert.equal(parseChanged(function (changed) {
+        changed.financialEvidence.monetaryObservations[0].labelText = "unsupported";
+      }).financialEvidence.monetaryObservations[0].labelText, "Netto");
+      assert.equal(parseChanged(function (changed) {
+        changed.financialEvidence.monetaryObservations[1].labelText = "unsupported";
+      }).financialEvidence.monetaryObservations[1].labelText, "BTW");
+      assert.equal(parseChanged(function (changed) {
+        changed.financialEvidence.monetaryObservations[0].labelText = null;
+      }).financialEvidence.monetaryObservations[0].labelText, "Netto");
+      assert.equal(parseChanged(function (changed) {
+        delete changed.financialEvidence.monetaryObservations[1].labelText;
+      }).financialEvidence.monetaryObservations[1].labelText, "BTW");
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].evidenceId = "";
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].labelText = 17;
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].sourceLineOrders = [];
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].sourceLineOrders = [5, 6];
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].sourceLineOrders = [99];
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.observedLines[4].roleEvidence = "product";
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].rawText = "Netto 99,99";
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].valueText = "99,99";
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0]
+            .reportedMeaningEvidence = "vat_amount";
+        });
+      }, /unsupported financial meaning/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0]
+            .reportedVatBasisEvidence = null;
+        });
+      }, /unsupported financial meaning/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0].rawText = "TOTAAL 48,27";
+          changed.financialEvidence.monetaryObservations[0].sourceLineOrders = [7];
+          changed.financialEvidence.monetaryObservations[0].valueText = "48,27";
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[1] =
+            JSON.parse(JSON.stringify(changed.financialEvidence.monetaryObservations[0]));
+          changed.financialEvidence.monetaryObservations[1].evidenceId = "duplicate-netto";
+        });
+      }, /invalid source evidence/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.observedLines[4].rawText = "Overig 39,89";
+          changed.financialEvidence.monetaryObservations[0].rawText = "Overig 39,89";
+        });
+      }, /unsupported financial meaning/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence = null;
+        });
+      }, /financialEvidence must be an object/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations = null;
+        });
+      }, /monetaryObservations must be an array/);
+      assert.throws(function () {
+        parseChanged(function (changed) {
+          changed.financialEvidence.monetaryObservations[0] = null;
+        });
+      }, /monetaryObservations\[0\] must be an object/);
+    },
+  );
+
+  QUnit.test(
     "Stage-1-v2 diagnostic parser — rejects malformed model JSON without repair",
     function (assert) {
       assert.throws(function () {
@@ -12372,7 +13430,7 @@ function doGet(options) {
   if (options && options.diagnosticsOnly === true) {
     return startQUnitDiagnosticReportAfterDone_(QUnit, function () {
       return QUnitGS2.getResultsFromServer();
-    });
+    }, selection.testFilter ? null : selection.batchName);
   }
 
   QUnit.start();
@@ -14043,7 +15101,7 @@ async function runQUnitDiagnostics(batchName) {
   return report;
 }
 
-function startQUnitDiagnosticReportAfterDone_(qunit, readResults) {
+function startQUnitDiagnosticReportAfterDone_(qunit, readResults, batchName) {
   const completion = new Promise(function (resolve) {
     qunit.done(function () {
       resolve();
@@ -14051,8 +15109,42 @@ function startQUnitDiagnosticReportAfterDone_(qunit, readResults) {
   });
   qunit.start();
   return completion.then(function () {
-    return buildQUnitDiagnosticReport(readResults());
+    return buildQUnitDiagnosticReport(readResults(), batchName);
   });
+}
+
+function buildSyntheticQUnitInventoryResults_(testCount, assertionCount, failed, completed) {
+  const events = [];
+  for (let index = 0; index < testCount; index += 1) {
+    const total = Math.floor(assertionCount / testCount) +
+      Number(index < assertionCount % testCount);
+    const testFailed = index < failed ? 1 : 0;
+    events.push({
+      type: "TESTS_RESULTS_ONE",
+      value: {
+        results: {
+          name: "synthetic test " + index,
+          total: total,
+          passed: total - testFailed,
+          failed: testFailed,
+        },
+        assertions: Array.from({ length: total }, function (_, assertionIndex) {
+          return { result: assertionIndex >= testFailed };
+        }),
+      },
+    });
+  }
+  if (completed) {
+    events.push({
+      type: "TESTS_RESULTS_ALL",
+      value: {
+        total: assertionCount,
+        passed: assertionCount - failed,
+        failed: failed,
+      },
+    });
+  }
+  return events;
 }
 
 // Manual-only regression: its independent lifecycle does not alter batch counts.
@@ -14063,6 +15155,33 @@ async function runGenericQUnitDiagnosticCompletionRegression() {
   QUnit.module("generic-diagnostic-completion-regression");
   QUnit.test("generic diagnostics read only after completion", function (assert) {
     const finish = assert.async();
+    validateQUnitExpectedBatchInventory_();
+    assert.equal(QUNIT_BATCH_NAMES.length, 22, "all authoritative batches have inventory");
+    assert.deepEqual(getQUnitExpectedBatchInventory_("staged-image-integration"), {
+      batchName: "staged-image-integration",
+      expectedTestCount: 31,
+      expectedAssertionCount: 31,
+    }, "current staged image inventory is retained");
+    function syntheticResults(testCount, assertionCount, failed, completed) {
+      return JSON.stringify(buildSyntheticQUnitInventoryResults_(
+        testCount, assertionCount, failed, completed,
+      ));
+    }
+    function diagnosticStatus(results) {
+      return JSON.parse(buildQUnitDiagnosticReport(results, "pdf-merge")).status;
+    }
+    assert.equal(diagnosticStatus(syntheticResults(7, 14, 0, true)),
+      "PASS", "exact completed inventory passes");
+    assert.equal(diagnosticStatus(syntheticResults(6, 12, 0, true)),
+      "RUNTIME_INVENTORY_MISMATCH", "missing test fails despite zero failures");
+    assert.equal(diagnosticStatus(syntheticResults(7, 13, 0, true)),
+      "RUNTIME_INVENTORY_MISMATCH", "missing assertion fails despite zero failures");
+    assert.equal(diagnosticStatus(syntheticResults(8, 16, 0, true)),
+      "RUNTIME_INVENTORY_MISMATCH", "extra test fails despite zero failures");
+    assert.equal(diagnosticStatus(syntheticResults(7, 14, 1, true)),
+      "TEST_FAILURE", "correct inventory with failure remains a test failure");
+    assert.equal(diagnosticStatus(syntheticResults(7, 14, 0, false)),
+      "INCOMPLETE_REPORT", "missing completion remains incomplete");
     let completionCallback;
     let startCount = 0;
     let readCount = 0;
@@ -14070,9 +15189,7 @@ async function runGenericQUnitDiagnosticCompletionRegression() {
       done: function (callback) { completionCallback = callback; },
       start: function () { startCount += 1; },
     };
-    const completeResults = JSON.stringify([
-      { type: "TESTS_RESULTS_ALL", value: { total: 1, passed: 1, failed: 0 } },
-    ]);
+    const completeResults = syntheticResults(1, 1, 0, true);
     const reportPromise = startQUnitDiagnosticReportAfterDone_(fakeQUnit, function () {
       readCount += 1;
       return completeResults;
@@ -14089,10 +15206,9 @@ async function runGenericQUnitDiagnosticCompletionRegression() {
       assert.equal(startCount, 2, "each diagnostic starts once");
       completionCallback();
       return missingResult;
-    }).then(function () {
-      assert.ok(false, "missing completion result must reject");
-    }, function (error) {
-      assert.ok(/no cached test results/.test(error.message), "missing result fails closed");
+    }).then(function (report) {
+      assert.equal(JSON.parse(report).status, "INCOMPLETE_REPORT",
+        "missing result produces a bounded incomplete report");
     }).then(finish);
   });
 
@@ -14125,7 +15241,7 @@ async function runPdfMergeQUnitDiagnostics() {
   QUnit.start();
   await completion;
 
-  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer(), "pdf-merge");
   console.log("QUnitGS2 batch pdf-merge:\n" + report);
   return report;
 }
@@ -14144,7 +15260,7 @@ async function runImagePdfAdapterQUnitDiagnostics() {
   QUnit.start();
   await completion;
 
-  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer(), "image-pdf-adapter");
   console.log("QUnitGS2 batch image-pdf-adapter:\n" + report);
   return report;
 }
@@ -14163,7 +15279,7 @@ async function runPdfPackageBuilderQUnitDiagnostics() {
   QUnit.start();
   await completion;
 
-  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer(), "pdf-package-builder");
   console.log("QUnitGS2 batch pdf-package-builder:\n" + report);
   return report;
 }
@@ -14182,7 +15298,7 @@ async function runWerkbonExportIntegrationQUnitDiagnostics() {
   QUnit.start();
   await completion;
 
-  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer());
+  const report = buildQUnitDiagnosticReport(QUnitGS2.getResultsFromServer(), "werkbon-export-integration");
   console.log("QUnitGS2 batch werkbon-export-integration:\n" + report);
   return report;
 }
@@ -14312,6 +15428,10 @@ async function runStagedStage1DiagnosticsQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-stage1-diagnostics");
 }
 
+async function runStagedStage1RequestDiagnosticsQUnitDiagnostics() {
+  return runQUnitDiagnostics("staged-stage1-request-diagnostics");
+}
+
 async function runStagedSourceTopologyQUnitDiagnostics() {
   return runQUnitDiagnostics("staged-source-topology");
 }
@@ -14336,6 +15456,18 @@ async function runFinancialSemanticGovernanceQUnitDiagnostics() {
   return runQUnitDiagnostics("financial-semantic-governance");
 }
 
+async function runFinancialCompositeEvidenceQUnitDiagnostics() {
+  return runQUnitDiagnostics("financial-composite-evidence");
+}
+
+async function runFinancialInterpretationAdapterQUnitDiagnostics() {
+  return runQUnitDiagnostics("financial-interpretation-adapter");
+}
+
+async function runFinancialGovernedInterpretationQUnitDiagnostics() {
+  return runQUnitDiagnostics("financial-governed-interpretation");
+}
+
 async function runFinancialInterpretationQUnitDiagnostics() {
   return runQUnitDiagnostics("financial-interpretation");
 }
@@ -14354,68 +15486,123 @@ async function runCollectorWiskaQUnitDiagnostic() {
   return report;
 }
 
-function buildQUnitDiagnosticReport(resultsText) {
+function buildQUnitDiagnosticReport(resultsText, batchName) {
+  const maxFailedTests = 10;
+  const expected = batchName
+    ? getQUnitExpectedBatchInventory_(batchName)
+    : null;
+  const report = {
+    status: "INCOMPLETE_REPORT",
+    batch: batchName || null,
+    expected: expected && {
+      tests: expected.expectedTestCount,
+      assertions: expected.expectedAssertionCount,
+    },
+    summary: null,
+    observed: null,
+    failedTests: [],
+    omittedFailedTests: 0,
+  };
   if (typeof resultsText !== "string" || resultsText.trim() === "") {
-    throw new Error("QUnitGS2 returned no cached test results.");
+    return JSON.stringify(report, null, 2);
   }
 
   let events;
-
   try {
     events = JSON.parse(resultsText);
   } catch (error) {
-    throw new Error(
-      "QUnitGS2 returned malformed cached test results: " + error.message,
-    );
+    return JSON.stringify(report, null, 2);
   }
-
   if (!Array.isArray(events)) {
-    throw new Error("QUnitGS2 cached test results must be an array.");
+    return JSON.stringify(report, null, 2);
   }
 
-  const report = {
-    status: "INCOMPLETE",
-    summary: null,
-    failedTests: [],
+  const summaries = events.filter(function (event) {
+    return event && event.type === "TESTS_RESULTS_ALL";
+  });
+  const tests = events.filter(function (event) {
+    return event && event.type === "TESTS_RESULTS_ONE";
+  });
+  if (summaries.length !== 1 || !summaries[0].value || tests.length === 0) {
+    return JSON.stringify(report, null, 2);
+  }
+
+  const summary = summaries[0].value;
+  const fields = [summary.total, summary.passed, summary.failed];
+  const assertionRecordCount = tests.reduce(function (total, event) {
+    return total + (event.value && Array.isArray(event.value.assertions)
+      ? event.value.assertions.length : 0);
+  }, 0);
+  if (
+    fields.some(function (value) {
+      return !Number.isInteger(value) || value < 0;
+    }) ||
+    summary.passed + summary.failed !== summary.total ||
+    tests.some(function (event) {
+      const result = event.value && event.value.results;
+      const assertions = event.value && event.value.assertions;
+      return !result || !Array.isArray(assertions) ||
+        !Number.isInteger(result.total) ||
+        !Number.isInteger(result.passed) ||
+        !Number.isInteger(result.failed) ||
+        result.total < 0 || result.passed < 0 || result.failed < 0 ||
+        result.passed + result.failed !== result.total ||
+        assertions.length !== result.total ||
+        assertions.some(function (assertion) {
+          return !assertion || typeof assertion.result !== "boolean";
+        }) ||
+        assertions.filter(function (assertion) {
+          return assertion.result === true;
+        }).length !== result.passed ||
+        assertions.filter(function (assertion) {
+          return assertion.result === false;
+        }).length !== result.failed;
+    }) ||
+    assertionRecordCount !== summary.total ||
+    tests.reduce(function (total, event) {
+      return total + event.value.results.total;
+    }, 0) !== summary.total ||
+    tests.reduce(function (total, event) {
+      return total + event.value.results.passed;
+    }, 0) !== summary.passed ||
+    tests.reduce(function (total, event) {
+      return total + event.value.results.failed;
+    }, 0) !== summary.failed
+  ) {
+    return JSON.stringify(report, null, 2);
+  }
+
+  report.observed = {
+    tests: tests.length,
+    assertions: summary.total,
+    passed: summary.passed,
+    failed: summary.failed,
   };
-
-  events.forEach(function (event) {
-    if (!event || !event.value) return;
-
-    if (event.type === "TESTS_RESULTS_ALL") {
-      report.summary = event.value;
-      report.status = Number(event.value.failed) > 0 ? "FAIL" : "PASS";
-      return;
-    }
-
-    if (event.type !== "TESTS_RESULTS_ONE") return;
-
-    const testResult = event.value.results || {};
-    const failedAssertions = (event.value.assertions || [])
-      .filter(function (assertion) {
-        return assertion && assertion.result === false;
-      })
-      .map(function (assertion) {
-        return {
-          message: assertion.message || "(no assertion message)",
-          actual: assertion.actual,
-          expected: assertion.expected,
-          source: assertion.source || "",
-          diff: assertion.diff || "",
-        };
-      });
-
-    if (Number(testResult.failed) > 0 || failedAssertions.length > 0) {
-      report.failedTests.push({
-        name: testResult.name || "(unnamed test)",
-        failed: Number(testResult.failed) || failedAssertions.length,
-        passed: Number(testResult.passed) || 0,
-        total: Number(testResult.total) || 0,
-        assertions: failedAssertions,
-      });
+  report.summary = {
+    total: summary.total,
+    passed: summary.passed,
+    failed: summary.failed,
+  };
+  tests.forEach(function (event, index) {
+    const result = event.value.results;
+    if (result.failed > 0) {
+      if (report.failedTests.length < maxFailedTests) {
+        report.failedTests.push({
+          ordinal: index + 1,
+          name: "[redacted]",
+          failed: result.failed,
+        });
+      } else {
+        report.omittedFailedTests += 1;
+      }
     }
   });
-
+  report.status = expected && (
+    tests.length !== expected.expectedTestCount ||
+    summary.total !== expected.expectedAssertionCount
+  )
+    ? "RUNTIME_INVENTORY_MISMATCH"
+    : summary.failed > 0 ? "TEST_FAILURE" : "PASS";
   return JSON.stringify(report, null, 2);
 }
 
@@ -15334,7 +16521,8 @@ function buildOpenAIStage1V2TableEvidenceDiagnosticPayload_(
     "Represent an observed empty cell position with rawText as an empty string and emptyEvidence true. " +
     "Do not replace an empty cell with zero and do not pack later cells into the empty position. " +
     "Do not assign financial meaning such as VAT amount, inclusive total, or exclusive total to table cells. " +
-    "Do not use arithmetic, totals, counts, or expected financial meaning to create or repair a cell association.";
+    "Do not use arithmetic, totals, counts, or expected financial meaning to create or repair a cell association. " +
+    "For this table-only diagnostic, omit financialEvidence.";
   payload.response_format.json_schema = {
     name: "stage1_v2_table_evidence",
     strict: true,
@@ -15345,6 +16533,11 @@ function buildOpenAIStage1V2TableEvidenceDiagnosticPayload_(
 
 function buildStage1V2TableEvidenceDiagnosticJsonSchema_() {
   const schema = buildStage1V2JsonSchema_();
+  // This pre-existing table diagnostic retains its physical-only schema.
+  delete schema.properties.financialEvidence;
+  schema.required = schema.required.filter(function (field) {
+    return field !== "financialEvidence";
+  });
   const cellSchema = {
     type: "object",
     additionalProperties: false,

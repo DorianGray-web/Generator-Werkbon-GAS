@@ -298,17 +298,24 @@ function buildOpenAIReceiptPayload(mimeType, base64Data) {
 function buildOpenAIStage1V2Payload_(mimeType, base64Data) {
   const prompt =
     "Produce Stage-1-v2 literal visual evidence for this receipt image. " +
-    "Inspect the complete printed product area, including its title and column-header lines, every physical product-description line, and the nearby printed product-count and total lines. " +
+    "Inspect the complete printed product area, including its title and column-header lines, every physical product-description line, and nearby printed product-count, Netto, BTW amount, and total lines. " +
     "Return exactly one observedLines entry for every relevant physical printed line in visual top-to-bottom order. " +
     "Preserve the complete physical line in rawText as literally as possible, including punctuation and decimal separators. " +
     "For each line, copy only text visibly present on that same physical line into leadingQuantityText, descriptionText, unitPriceText, and lineTotalText; use null when a column is blank or not visible. " +
     "Do not create canonical products. Do not merge physical lines. Do not move a quantity or price between lines. " +
     "Do not calculate, reconcile, correct, or repair arithmetic. Do not use a printed total or product count to change any line observation. " +
-    'Classify actual purchased-material evidence as roleEvidence "product". Use roleEvidence "summary" only for primary bounded summary anchors such as the printed total and optional printed product count. ' +
-    'Use roleEvidence "informational" only for explicit non-product terminal receipt observations such as payment or tender lines, change lines, VAT breakdown lines, or other clearly non-product informational rows. Preserve each such visible line as its own observedLines entry. ' +
+    'Classify actual purchased-material evidence as roleEvidence "product". Use roleEvidence "summary" for printed total, optional printed product count, and explicit Netto or BTW amount rows in the same financial summary block. ' +
+    'Use roleEvidence "informational" only for explicit non-product terminal receipt observations such as payment or tender lines, change lines, VAT breakdown lines outside that summary block, or other clearly non-product informational rows. Preserve each such visible line as its own observedLines entry. ' +
     'Classify roleEvidence only as "header", "product", "summary", "informational", or "unknown". ' +
     'roleEvidence is perception evidence, not authoritative truth; never use "informational" to hide an ambiguous or potentially product-like row, and use roleEvidence "unknown" whenever the visual role is uncertain or unresolved. ' +
     "For printedProductCount and printedTotal, preserve rawText and separately copy the visible labelText and valueText, linking each object to its physical observed line through sourceLineOrder. " +
+    'First inspect the complete financial summary and decide whether one or more complete explicit VAT-summary relationships qualify for financialEvidence.vatBreakdowns before extracting any atomic financial observation. For this Stage-1 contract, vatBreakdowns and monetaryObservations are mutually exclusive representation modes. If vatBreakdowns.length > 0, emit those tuples, set monetaryObservations = [], do not perform atomic Netto or BTW extraction, and do not duplicate any rate, taxable-base, VAT-amount, or related-total component into monetaryObservations. ' +
+    'When the document visibly presents an explicit VAT summary relationship in which a printed VAT percentage is applied to a taxable amount, together with the corresponding VAT amount and a related resulting total, emit one financialEvidence.vatBreakdowns tuple. The taxable base does not require the literal label "Netto"; wording such as "BTW van" may identify the visibly associated amount as taxableBase. ' +
+    'Multiple tuple components may originate from the same physical summary line. Set componentProvenance for every component to its literal value and actual summary source line. Set associationEvidence to "explicit_vat_summary_relationship" only when that relationship is visually explicit. Do not emit that same relationship as monetaryObservations. ' +
+    'For each vatBreakdown, sourceLineOrders must contain exactly the unique sourceLineOrder values referenced by componentProvenance.rate, componentProvenance.taxableBase, componentProvenance.vatAmount, and componentProvenance.total. Include no additional contextual summary lines: every sourceLineOrders entry must prove at least one tuple component, and every component provenance line must appear in sourceLineOrders. If all four components come from the same physical summary line, sourceLineOrders must contain exactly one value; for example, all components on line 16 means sourceLineOrders = [16]. Do not include an adjacent contextual line such as line 17 merely because it is part of the same visual summary area. Preserve valid multi-line tuples: if rate, taxable base, and VAT amount come from line 12 while total comes from line 13, sourceLineOrders = [12, 13]. ' +
+    'Set totalVatBasisEvidence to "inclVAT" only when the printed VAT-summary layout visibly identifies the related total as the result of that taxable-base and VAT relationship; otherwise use null. A bare or unrelated "Totaal" label remains insufficient. Emit vatBreakdowns as an empty array when no complete explicit relationship is visible. ' +
+    'Only if no complete explicit VAT-summary relationship exists, set vatBreakdowns = [] and then consider atomic monetaryObservations. monetaryObservations may be populated only when vatBreakdowns = []. In that mode, for each atomic explicit Netto or BTW amount summary row that represents one explicit financial meaning tied to one amount, add one financialEvidence.monetaryObservations entry with a unique evidenceId and a single sourceLineOrders entry linked to that same observed summary line. Copy its literal rawText, labelText, and valueText; use reportedMeaningEvidence "document_total" with reportedVatBasisEvidence "exclVAT" for Netto, or "vat_amount" with null basis for BTW; use reportedScopeEvidence "document". Do not invent missing rows or amounts. Do not duplicate printedTotal in monetaryObservations. A grouped VAT-summary row or block containing visibly related rate, taxable-base, VAT-amount, and related-total evidence is not atomic and must not be collapsed into one monetaryObservation. ' +
+    'Do not infer a VAT breakdown from supplier identity, document title, row position, amount magnitude, or arithmetic. Do not treat taxableBase as a document exclVAT total, and do not treat total as inclVAT without explicit basis authority. ' +
     'For printedTotal, totalTypeEvidence may be "inclVAT" or "exclVAT" only when that meaning is visually explicit; otherwise totalTypeEvidence must be null. ' +
     'Never infer "inclVAT" merely from a label such as "Totaal". ' +
     "Return only the JSON object required by the response schema.";
@@ -619,8 +626,109 @@ function buildStage1V2JsonSchema_() {
         },
         required: ["printedProductCount", "printedTotal"],
       },
+      financialEvidence: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          monetaryObservations: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                evidenceId: { type: "string" },
+                sourceLineOrders: {
+                  type: "array",
+                  items: { type: "integer", minimum: 1 },
+                },
+                rawText: { type: "string" },
+                labelText: { type: "string" },
+                valueText: { type: "string" },
+                reportedMeaningEvidence: {
+                  type: "string",
+                  enum: ["document_total", "vat_amount"],
+                },
+                reportedVatBasisEvidence: {
+                  type: ["string", "null"],
+                  enum: ["exclVAT", null],
+                },
+                reportedScopeEvidence: {
+                  type: "string",
+                  enum: ["document"],
+                },
+              },
+              required: [
+                "evidenceId", "sourceLineOrders", "rawText", "labelText",
+                "valueText", "reportedMeaningEvidence",
+                "reportedVatBasisEvidence", "reportedScopeEvidence",
+              ],
+            },
+          },
+          vatBreakdowns: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                evidenceId: { type: "string" },
+                sourceLineOrders: {
+                  type: "array",
+                  minItems: 1,
+                  items: { type: "integer", minimum: 1 },
+                },
+                rateText: { type: "string" },
+                taxableBaseText: { type: "string" },
+                vatAmountText: { type: "string" },
+                totalText: { type: "string" },
+                reportedScopeEvidence: {
+                  type: "string",
+                  enum: ["document"],
+                },
+                totalVatBasisEvidence: {
+                  type: ["string", "null"],
+                  enum: ["inclVAT", null],
+                },
+                componentProvenance: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    rate: buildStage1V2VatComponentProvenanceSchema_(),
+                    taxableBase: buildStage1V2VatComponentProvenanceSchema_(),
+                    vatAmount: buildStage1V2VatComponentProvenanceSchema_(),
+                    total: buildStage1V2VatComponentProvenanceSchema_(),
+                  },
+                  required: ["rate", "taxableBase", "vatAmount", "total"],
+                },
+                associationEvidence: {
+                  type: "string",
+                  enum: ["explicit_vat_summary_relationship"],
+                },
+              },
+              required: [
+                "evidenceId", "sourceLineOrders", "rateText",
+                "taxableBaseText", "vatAmountText", "totalText",
+                "reportedScopeEvidence", "totalVatBasisEvidence",
+                "componentProvenance", "associationEvidence",
+              ],
+            },
+          },
+        },
+        required: ["monetaryObservations", "vatBreakdowns"],
+      },
     },
-    required: ["observedLines", "summaryEvidence"],
+    required: ["observedLines", "summaryEvidence", "financialEvidence"],
+  };
+}
+
+function buildStage1V2VatComponentProvenanceSchema_() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      sourceLineOrder: { type: "integer", minimum: 1 },
+      valueText: { type: "string" },
+    },
+    required: ["sourceLineOrder", "valueText"],
   };
 }
 
@@ -666,7 +774,9 @@ function validateStage1V2Evidence_(evidence) {
   assertStage1V2PlainObject_(evidence, "evidence");
   assertStage1V2ExactKeys_(
     evidence,
-    ["observedLines", "summaryEvidence"],
+    evidence.financialEvidence === undefined
+      ? ["observedLines", "summaryEvidence"]
+      : ["observedLines", "summaryEvidence", "financialEvidence"],
     "evidence",
   );
 
@@ -742,6 +852,273 @@ function validateStage1V2Evidence_(evidence) {
     "summaryEvidence.printedTotal",
     true,
   );
+  if (evidence.financialEvidence !== undefined) {
+    assertStage1V2PlainObject_(evidence.financialEvidence, "financialEvidence");
+    const hasVatBreakdowns = Object.prototype.hasOwnProperty.call(
+      evidence.financialEvidence,
+      "vatBreakdowns",
+    );
+    assertStage1V2ExactKeys_(
+      evidence.financialEvidence,
+      hasVatBreakdowns
+        ? ["monetaryObservations", "vatBreakdowns"]
+        : ["monetaryObservations"],
+      "financialEvidence",
+    );
+    if (!Array.isArray(evidence.financialEvidence.monetaryObservations)) {
+      throw new Error("Stage-1-v2 financialEvidence.monetaryObservations must be an array.");
+    }
+    evidence.financialEvidence.monetaryObservations.forEach(function (item, index) {
+      const path = "financialEvidence.monetaryObservations[" + index + "]";
+      assertStage1V2PlainObject_(item, path);
+      const observationKeys = [
+        "evidenceId", "sourceLineOrders", "rawText", "labelText", "valueText",
+        "reportedMeaningEvidence", "reportedVatBasisEvidence",
+        "reportedScopeEvidence",
+      ];
+      // A missing label is the sole missing field eligible for source-grounded
+      // recovery; all other missing or extra fields retain strict rejection.
+      assertStage1V2ExactKeys_(item,
+        Object.prototype.hasOwnProperty.call(item, "labelText")
+          ? observationKeys
+          : observationKeys.filter(function (key) {
+              return key !== "labelText";
+            }), path);
+      if (typeof item.evidenceId !== "string" || !item.evidenceId.trim() ||
+          !Array.isArray(item.sourceLineOrders) || item.sourceLineOrders.length !== 1 ||
+          !Number.isInteger(item.sourceLineOrders[0]) || item.sourceLineOrders[0] <= 0 ||
+          ["rawText", "valueText"].some(function (field) {
+            return typeof item[field] !== "string" || !item[field].trim();
+          }) || (item.labelText !== undefined && item.labelText !== null &&
+            typeof item.labelText !== "string")) {
+        throw new Error("Stage-1-v2 " + path + " has invalid source evidence.");
+      }
+      let label = typeof item.labelText === "string"
+        ? item.labelText.trim().toLowerCase().replace(/[.:]/g, "").trim()
+        : "";
+      const recoveryCode = !label
+        ? "MONETARY_LABEL_MISSING_OR_BLANK"
+        : label !== "netto" && label !== "btw"
+          ? "MONETARY_LABEL_UNSUPPORTED_STRING"
+          : null;
+      if (recoveryCode !== null) {
+        item.labelText = recoverStage1V2KnownMonetaryLabel_(
+          item, evidence, path,
+        );
+        label = item.labelText.toLowerCase();
+      }
+      const isNetto = label === "netto";
+      const isBtw = label === "btw";
+      if ((!isNetto && !isBtw) ||
+          item.reportedMeaningEvidence !== (isNetto ? "document_total" : "vat_amount") ||
+          item.reportedVatBasisEvidence !== (isNetto ? "exclVAT" : null) ||
+          item.reportedScopeEvidence !== "document" ||
+          item.rawText.toLowerCase().indexOf(label) < 0 ||
+          item.rawText.indexOf(item.valueText) < 0) {
+        throw new Error("Stage-1-v2 " + path + " has unsupported financial meaning.");
+      }
+    });
+    if (hasVatBreakdowns) {
+      validateStage1V2VatBreakdowns_(evidence);
+    }
+  }
+}
+
+function recoverStage1V2KnownMonetaryLabel_(item, evidence, path) {
+  const order = item.sourceLineOrders[0];
+  const sourceLines = evidence.observedLines.filter(function (line) {
+    return line.order === order;
+  });
+  const sourceLine = sourceLines.length === 1 ? sourceLines[0] : null;
+  const duplicateReference =
+    evidence.financialEvidence.monetaryObservations.filter(function (other) {
+      return other && Array.isArray(other.sourceLineOrders) &&
+        other.sourceLineOrders.indexOf(order) >= 0;
+    }).length !== 1;
+  if (!sourceLine || sourceLine.roleEvidence !== "summary" ||
+      sourceLine.rawText !== item.rawText || duplicateReference ||
+      (evidence.summaryEvidence.printedTotal &&
+        evidence.summaryEvidence.printedTotal.sourceLineOrder === order) ||
+      (evidence.summaryEvidence.printedProductCount &&
+        evidence.summaryEvidence.printedProductCount.sourceLineOrder === order)) {
+    throw new Error("Stage-1-v2 " + path + " has invalid source evidence.");
+  }
+  // An anchored two-token monetary row is the only accepted recovery source.
+  // Its one value must exactly match the observation; no amount is repaired.
+  const sourceMatch = sourceLine.rawText.trim().match(
+    /^(Netto|BTW)\s+(\d{1,6}[.,]\d{2})$/i,
+  );
+  if (!sourceMatch) {
+    throw new Error("Stage-1-v2 " + path + " has unsupported financial meaning.");
+  }
+  const literalLabel = sourceMatch[1].toLowerCase();
+  if (item.valueText.trim() !== sourceMatch[2]) {
+    throw new Error("Stage-1-v2 " + path + " has invalid source evidence.");
+  }
+  if (item.reportedMeaningEvidence !==
+        (literalLabel === "netto" ? "document_total" : "vat_amount") ||
+      item.reportedVatBasisEvidence !==
+        (literalLabel === "netto" ? "exclVAT" : null) ||
+      item.reportedScopeEvidence !== "document") {
+    throw new Error("Stage-1-v2 " + path + " has unsupported financial meaning.");
+  }
+  return sourceMatch[1];
+}
+
+function validateStage1V2VatBreakdowns_(evidence) {
+  const financialEvidence = evidence.financialEvidence;
+  const vatBreakdowns = financialEvidence.vatBreakdowns;
+  if (!Array.isArray(vatBreakdowns)) {
+    throw new Error("Stage-1-v2 financialEvidence.vatBreakdowns must be an array.");
+  }
+  if (
+    vatBreakdowns.length > 0 &&
+    financialEvidence.monetaryObservations.length > 0
+  ) {
+    throw new Error(
+      "Stage-1-v2 financialEvidence has overlapping financial representations.",
+    );
+  }
+
+  const observationByOrder = {};
+  evidence.observedLines.forEach(function (line) {
+    if (!observationByOrder[line.order]) observationByOrder[line.order] = [];
+    observationByOrder[line.order].push(line);
+  });
+  const reservedOrders = {};
+  [
+    evidence.summaryEvidence.printedProductCount,
+    evidence.summaryEvidence.printedTotal,
+  ].forEach(function (item) {
+    if (item) reservedOrders[item.sourceLineOrder] = true;
+  });
+  const monetaryEvidenceIds = {};
+  financialEvidence.monetaryObservations.forEach(function (item) {
+    monetaryEvidenceIds[item.evidenceId] = true;
+    item.sourceLineOrders.forEach(function (order) {
+      reservedOrders[order] = true;
+    });
+  });
+
+  const seenEvidenceIds = {};
+  const seenSourceOrders = {};
+  vatBreakdowns.forEach(function (tuple, index) {
+    const path = "financialEvidence.vatBreakdowns[" + index + "]";
+    assertStage1V2PlainObject_(tuple, path);
+    assertStage1V2ExactKeys_(tuple, [
+      "evidenceId", "sourceLineOrders", "rateText", "taxableBaseText",
+      "vatAmountText", "totalText", "reportedScopeEvidence",
+      "totalVatBasisEvidence", "componentProvenance", "associationEvidence",
+    ], path);
+    if (
+      typeof tuple.evidenceId !== "string" || !tuple.evidenceId.trim() ||
+      seenEvidenceIds[tuple.evidenceId] || monetaryEvidenceIds[tuple.evidenceId]
+    ) {
+      throw new Error("Stage-1-v2 " + path + " has invalid evidence identity.");
+    }
+    seenEvidenceIds[tuple.evidenceId] = true;
+    if (
+      !Array.isArray(tuple.sourceLineOrders) ||
+      tuple.sourceLineOrders.length === 0 ||
+      tuple.sourceLineOrders.some(function (order, orderIndex) {
+        return !Number.isInteger(order) || order <= 0 ||
+          tuple.sourceLineOrders.indexOf(order) !== orderIndex;
+      })
+    ) {
+      throw new Error("Stage-1-v2 " + path + " has invalid source evidence.");
+    }
+    tuple.sourceLineOrders.forEach(function (order) {
+      const lines = observationByOrder[order] || [];
+      if (
+        lines.length !== 1 || lines[0].roleEvidence !== "summary" ||
+        reservedOrders[order] || seenSourceOrders[order]
+      ) {
+        throw new Error("Stage-1-v2 " + path + " has invalid source evidence.");
+      }
+      seenSourceOrders[order] = true;
+    });
+    if (
+      !isStage1V2VatRateText_(tuple.rateText) ||
+      !isStage1V2PlainAmountText_(tuple.taxableBaseText) ||
+      !isStage1V2PlainAmountText_(tuple.vatAmountText) ||
+      !isStage1V2PlainAmountText_(tuple.totalText) ||
+      tuple.reportedScopeEvidence !== "document" ||
+      ["inclVAT", null].indexOf(tuple.totalVatBasisEvidence) < 0 ||
+      tuple.associationEvidence !== "explicit_vat_summary_relationship"
+    ) {
+      throw new Error("Stage-1-v2 " + path + " has unsupported VAT breakdown semantics.");
+    }
+
+    assertStage1V2PlainObject_(
+      tuple.componentProvenance,
+      path + ".componentProvenance",
+    );
+    const componentSpecs = [
+      ["rate", "rateText"],
+      ["taxableBase", "taxableBaseText"],
+      ["vatAmount", "vatAmountText"],
+      ["total", "totalText"],
+    ];
+    assertStage1V2ExactKeys_(
+      tuple.componentProvenance,
+      componentSpecs.map(function (spec) { return spec[0]; }),
+      path + ".componentProvenance",
+    );
+    const usedSourceOrders = {};
+    const usedFragments = {};
+    componentSpecs.forEach(function (spec) {
+      const componentName = spec[0];
+      const textField = spec[1];
+      const componentPath = path + ".componentProvenance." + componentName;
+      const provenance = tuple.componentProvenance[componentName];
+      assertStage1V2PlainObject_(provenance, componentPath);
+      assertStage1V2ExactKeys_(
+        provenance,
+        ["sourceLineOrder", "valueText"],
+        componentPath,
+      );
+      const sourceLineOrder = provenance.sourceLineOrder;
+      const valueText = provenance.valueText;
+      const sourceLines = observationByOrder[sourceLineOrder] || [];
+      const sourceLine = sourceLines.length === 1 ? sourceLines[0] : null;
+      const fragmentKey = String(sourceLineOrder) + "\n" + String(valueText);
+      if (
+        tuple.sourceLineOrders.indexOf(sourceLineOrder) < 0 ||
+        valueText !== tuple[textField] ||
+        !sourceLine || sourceLine.roleEvidence !== "summary" ||
+        sourceLine.rawText.indexOf(valueText) < 0 ||
+        sourceLine.rawText.indexOf(valueText) !==
+          sourceLine.rawText.lastIndexOf(valueText) ||
+        usedFragments[fragmentKey]
+      ) {
+        throw new Error(
+          "Stage-1-v2 " + path + " has ambiguous component provenance.",
+        );
+      }
+      usedFragments[fragmentKey] = true;
+      usedSourceOrders[sourceLineOrder] = true;
+    });
+    if (tuple.sourceLineOrders.some(function (order) {
+      return !usedSourceOrders[order];
+    })) {
+      throw new Error(
+        "Stage-1-v2 " + path + " has ambiguous association evidence.",
+      );
+    }
+  });
+}
+
+function isStage1V2VatRateText_(value) {
+  if (typeof value !== "string") return false;
+  const match = /^(\d{1,3})(?:[.,](\d{1,2}))?%$/.exec(value.trim());
+  if (!match) return false;
+  const basisPoints = Number(match[1]) * 100 +
+    Number((match[2] || "").padEnd(2, "0") || 0);
+  return basisPoints > 0 && basisPoints <= 10000;
+}
+
+function isStage1V2PlainAmountText_(value) {
+  return typeof value === "string" && /^\d{1,6}[.,]\d{2}$/.test(value.trim());
 }
 
 function validateStage1V2SummaryObject_(evidence, path, isTotal) {
