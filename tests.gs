@@ -79,7 +79,7 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "Stage-1-v3 projection",
     ],
     expectedTestCount: 29,
-    expectedAssertionCount: 169,
+    expectedAssertionCount: 175,
   },
   {
     batchName: "staged-stage1-request-diagnostics",
@@ -277,7 +277,7 @@ function validatePermanentStagedPartition_(registrations) {
   if (
     registrations.length !== 163 ||
     new Set(names).size !== 163 ||
-    expectedAssertionTotal !== 808 ||
+    expectedAssertionTotal !== 814 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -11078,17 +11078,26 @@ function doGet(options) {
               "physical summary line",
           ) >= 0 &&
           prompt.indexOf(
-            "sourceLineOrders must contain exactly the unique " +
-              "sourceLineOrder values referenced by",
+            "sourceLineOrders must contain every summary-role line " +
+              "explicitly belonging to that same visible VAT-summary " +
+              "relationship",
           ) >= 0 &&
           prompt.indexOf(
-            "Include no additional contextual summary lines",
+            "every componentProvenance sourceLineOrder must appear in " +
+              "sourceLineOrders",
+          ) >= 0 &&
+          prompt.indexOf(
+            "may include an additional summary line only when that line " +
+              "is explicitly part of the same VAT-summary relationship",
+          ) >= 0 &&
+          prompt.indexOf(
+            "do not include a contextual line merely because it is nearby",
           ) >= 0 &&
           prompt.indexOf(
             "all components on line 16 means sourceLineOrders = [16]",
           ) >= 0 &&
           prompt.indexOf(
-            "sourceLineOrders = [12, 13]",
+            "Preserve valid multi-line relationships",
           ) >= 0 &&
           prompt.indexOf(
             "is not atomic and must not be collapsed into one " +
@@ -11129,6 +11138,72 @@ function doGet(options) {
         parsed.financialEvidence.vatBreakdowns,
         fixture.financialEvidence.vatBreakdowns,
       ));
+      const sameLineAssociation = changed(function (evidence) {
+        evidence.observedLines.forEach(function (line) {
+          if (line.order === 12) line.order = 16;
+          else if (line.order === 13) line.order = 17;
+        });
+        const tuple = evidence.financialEvidence.vatBreakdowns[0];
+        tuple.sourceLineOrders = [16, 17];
+        Object.keys(tuple.componentProvenance).forEach(function (name) {
+          tuple.componentProvenance[name].sourceLineOrder = 16;
+        });
+      })();
+      assert.ok(compactJsonEquality(
+        sameLineAssociation.financialEvidence.vatBreakdowns[0]
+          .sourceLineOrders,
+        [16, 17],
+      ));
+      const multipleAssociatedSummaryLines = changed(function (evidence) {
+        const contextualLine = JSON.parse(JSON.stringify(
+          evidence.observedLines.filter(function (line) {
+            return line.order === 13;
+          })[0],
+        ));
+        contextualLine.order = 14;
+        evidence.observedLines.push(contextualLine);
+        const tuple = evidence.financialEvidence.vatBreakdowns[0];
+        tuple.sourceLineOrders = [12, 13, 14];
+        Object.keys(tuple.componentProvenance).forEach(function (name) {
+          tuple.componentProvenance[name].sourceLineOrder = 12;
+        });
+      })();
+      assert.ok(compactJsonEquality(
+        multipleAssociatedSummaryLines.financialEvidence.vatBreakdowns[0]
+          .sourceLineOrders,
+        [12, 13, 14],
+      ));
+      const multiLineAssociation = changed(function (evidence) {
+        const contextualLine = JSON.parse(JSON.stringify(
+          evidence.observedLines.filter(function (line) {
+            return line.order === 13;
+          })[0],
+        ));
+        contextualLine.order = 14;
+        evidence.observedLines.push(contextualLine);
+        evidence.financialEvidence.vatBreakdowns[0].sourceLineOrders = [
+          12, 13, 14,
+        ];
+      })();
+      assert.ok(compactJsonEquality(
+        multiLineAssociation.financialEvidence.vatBreakdowns[0]
+          .sourceLineOrders,
+        [12, 13, 14],
+      ));
+      assert.throws(changed(function (evidence) {
+        evidence.financialEvidence.vatBreakdowns[0].sourceLineOrders = [12];
+      }), /ambiguous component provenance/);
+      assert.throws(changed(function (evidence) {
+        evidence.observedLines.filter(function (line) {
+          return line.order === 12;
+        })[0].roleEvidence = "product";
+      }), /invalid source evidence/);
+      assert.throws(changed(function (evidence) {
+        const tuple = evidence.financialEvidence.vatBreakdowns[0];
+        tuple.totalText = tuple.vatAmountText;
+        tuple.componentProvenance.total.sourceLineOrder = 12;
+        tuple.componentProvenance.total.valueText = tuple.vatAmountText;
+      }), /ambiguous component provenance/);
       assert.equal(changed(function (evidence) {
         evidence.financialEvidence.vatBreakdowns[0]
           .totalVatBasisEvidence = null;
@@ -11209,15 +11284,43 @@ function doGet(options) {
           "DUPLICATE_FINANCIAL_EVIDENCE_REPRESENTATION",
         ));
 
-      const ambiguousAssociation = changed(function (evidence) {
-        evidence.financialEvidence.vatBreakdowns[0]
-          .componentProvenance.total.sourceLineOrder = 12;
-      });
-      assert.ok(!ambiguousAssociation.structuralStatus.resolved &&
-        hasStructuralCode(
-          ambiguousAssociation,
-          "AMBIGUOUS_VAT_BREAKDOWN_ASSOCIATION",
+      const componentSubsetAssociation = changed(function (evidence) {
+        const contextualLine = JSON.parse(JSON.stringify(
+          evidence.observedLines[12],
         ));
+        contextualLine.order = 14;
+        evidence.observedLines.push(contextualLine);
+        const tuple = evidence.financialEvidence.vatBreakdowns[0];
+        tuple.sourceLineOrders = [12, 13, 14];
+        Object.keys(tuple.componentProvenance).forEach(function (name) {
+          tuple.componentProvenance[name].sourceLineOrder = 12;
+        });
+      });
+
+      const undeclaredSummaryObservation = changed(function (evidence) {
+        const contextualLine = JSON.parse(JSON.stringify(
+          evidence.observedLines[12],
+        ));
+        contextualLine.order = 14;
+        evidence.observedLines.push(contextualLine);
+      });
+      assert.ok(compactJsonEquality({
+        associatedStructural:
+          componentSubsetAssociation.structuralStatus.resolved,
+        associatedFinancial:
+          componentSubsetAssociation.financialStatus.resolved,
+        undeclaredStructural:
+          undeclaredSummaryObservation.structuralStatus.resolved,
+        undeclaredOrphan: hasStructuralCode(
+          undeclaredSummaryObservation,
+          "UNLINKED_SUMMARY_OBSERVATION",
+        ),
+      }, {
+        associatedStructural: true,
+        associatedFinancial: true,
+        undeclaredStructural: false,
+        undeclaredOrphan: true,
+      }));
 
       const inconsistentLiteral = changed(function (evidence) {
         const tuple = evidence.financialEvidence.vatBreakdowns[0];
@@ -11299,6 +11402,23 @@ function doGet(options) {
       const normalized = normalizeAndAggregateReceiptData(
         candidate.canonicalReceipt,
       );
+      const associatedFixture = completeVatBreakdownTupleFixture();
+      Object.keys(
+        associatedFixture.financialEvidence.vatBreakdowns[0]
+          .componentProvenance,
+      ).forEach(function (name) {
+        associatedFixture.financialEvidence.vatBreakdowns[0]
+          .componentProvenance[name].sourceLineOrder = 12;
+      });
+      const associatedParsed = parseOpenAIStage1V2Response_(
+        createMockOpenAIResponse(JSON.stringify(associatedFixture)),
+      );
+      const associatedCandidate = buildStagedReceiptCandidateExperiment(
+        associatedParsed,
+      );
+      const associatedNormalized = normalizeAndAggregateReceiptData(
+        associatedCandidate.canonicalReceipt,
+      );
       const written = [];
       const sheet = {
         getLastRow: function () { return 1; },
@@ -11327,6 +11447,16 @@ function doGet(options) {
         candidateDocumentTotalInclVat: candidate.documentTotalInclVat,
         normalizedDocumentTotalInclVat: normalized.documentTotalInclVat,
         reconciled: normalized.reconciled,
+        associatedSourceLineOrders:
+          associatedParsed.financialEvidence.vatBreakdowns[0]
+            .sourceLineOrders,
+        associatedStructural:
+          associatedCandidate.structuralStatus.resolved,
+        associatedFinancial: associatedCandidate.financialStatus,
+        associatedTotals: associatedCandidate.canonicalReceipt.totals,
+        associatedDocumentTotalInclVat:
+          associatedNormalized.documentTotalInclVat,
+        associatedReconciled: associatedNormalized.reconciled,
         columnG: written.map(function (row) { return row[6]; }),
       }, {
         structural: true,
@@ -11347,6 +11477,19 @@ function doGet(options) {
         candidateDocumentTotalInclVat: 48.27,
         normalizedDocumentTotalInclVat: 48.27,
         reconciled: true,
+        associatedSourceLineOrders: [12, 13],
+        associatedStructural: true,
+        associatedFinancial: {
+          resolved: true,
+          code: "FINANCIAL_EVIDENCE_RESOLVED",
+        },
+        associatedTotals: {
+          exclVAT: null,
+          inclVAT: 48.27,
+          vatAmount: 8.38,
+        },
+        associatedDocumentTotalInclVat: 48.27,
+        associatedReconciled: true,
         columnG: ["", "", "", 48.27],
       }));
     },

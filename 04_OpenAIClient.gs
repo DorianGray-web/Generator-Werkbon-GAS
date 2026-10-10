@@ -312,7 +312,7 @@ function buildOpenAIStage1V2Payload_(mimeType, base64Data) {
     'First inspect the complete financial summary and decide whether one or more complete explicit VAT-summary relationships qualify for financialEvidence.vatBreakdowns before extracting any atomic financial observation. For this Stage-1 contract, vatBreakdowns and monetaryObservations are mutually exclusive representation modes. If vatBreakdowns.length > 0, emit those tuples, set monetaryObservations = [], do not perform atomic Netto or BTW extraction, and do not duplicate any rate, taxable-base, VAT-amount, or related-total component into monetaryObservations. ' +
     'When the document visibly presents an explicit VAT summary relationship in which a printed VAT percentage is applied to a taxable amount, together with the corresponding VAT amount and a related resulting total, emit one financialEvidence.vatBreakdowns tuple. The taxable base does not require the literal label "Netto"; wording such as "BTW van" may identify the visibly associated amount as taxableBase. ' +
     'Multiple tuple components may originate from the same physical summary line. Set componentProvenance for every component to its literal value and actual summary source line. Set associationEvidence to "explicit_vat_summary_relationship" only when that relationship is visually explicit. Do not emit that same relationship as monetaryObservations. ' +
-    'For each vatBreakdown, sourceLineOrders must contain exactly the unique sourceLineOrder values referenced by componentProvenance.rate, componentProvenance.taxableBase, componentProvenance.vatAmount, and componentProvenance.total. Include no additional contextual summary lines: every sourceLineOrders entry must prove at least one tuple component, and every component provenance line must appear in sourceLineOrders. If all four components come from the same physical summary line, sourceLineOrders must contain exactly one value; for example, all components on line 16 means sourceLineOrders = [16]. Do not include an adjacent contextual line such as line 17 merely because it is part of the same visual summary area. Preserve valid multi-line tuples: if rate, taxable base, and VAT amount come from line 12 while total comes from line 13, sourceLineOrders = [12, 13]. ' +
+    'For each vatBreakdown, sourceLineOrders must contain every summary-role line explicitly belonging to that same visible VAT-summary relationship. componentProvenance must identify the exact source line and literal for each of rate, taxableBase, vatAmount, and total, and every componentProvenance sourceLineOrder must appear in sourceLineOrders. sourceLineOrders may include an additional summary line only when that line is explicitly part of the same VAT-summary relationship; do not include a contextual line merely because it is nearby or part of the same general summary area. If all four components come from the same physical summary line and there is no other explicitly associated VAT-summary line, sourceLineOrders contains that one value; for example, all components on line 16 means sourceLineOrders = [16]. Preserve valid multi-line relationships, including a component-bearing line plus another explicitly associated VAT-summary line. ' +
     'Set totalVatBasisEvidence to "inclVAT" only when the printed VAT-summary layout visibly identifies the related total as the result of that taxable-base and VAT relationship; otherwise use null. A bare or unrelated "Totaal" label remains insufficient. Emit vatBreakdowns as an empty array when no complete explicit relationship is visible. ' +
     'Only if no complete explicit VAT-summary relationship exists, set vatBreakdowns = [] and then consider atomic monetaryObservations. monetaryObservations may be populated only when vatBreakdowns = []. In that mode, for each atomic explicit Netto or BTW amount summary row that represents one explicit financial meaning tied to one amount, add one financialEvidence.monetaryObservations entry with a unique evidenceId and a single sourceLineOrders entry linked to that same observed summary line. Copy its literal rawText, labelText, and valueText; use reportedMeaningEvidence "document_total" with reportedVatBasisEvidence "exclVAT" for Netto, or "vat_amount" with null basis for BTW; use reportedScopeEvidence "document". Do not invent missing rows or amounts. Do not duplicate printedTotal in monetaryObservations. A grouped VAT-summary row or block containing visibly related rate, taxable-base, VAT-amount, and related-total evidence is not atomic and must not be collapsed into one monetaryObservation. ' +
     'Do not infer a VAT breakdown from supplier identity, document title, row position, amount magnitude, or arithmetic. Do not treat taxableBase as a document exclVAT total, and do not treat total as inclVAT without explicit basis authority. ' +
@@ -1027,7 +1027,8 @@ function validateStage1V2VatBreakdowns_(evidence) {
     ) {
       throw new Error("Stage-1-v2 " + path + " has invalid source evidence.");
     }
-    tuple.sourceLineOrders.forEach(function (order) {
+    const declaredSourceOrders = tuple.sourceLineOrders.slice();
+    declaredSourceOrders.forEach(function (order) {
       const lines = observationByOrder[order] || [];
       if (
         lines.length !== 1 || lines[0].roleEvidence !== "summary" ||
@@ -1064,7 +1065,6 @@ function validateStage1V2VatBreakdowns_(evidence) {
       componentSpecs.map(function (spec) { return spec[0]; }),
       path + ".componentProvenance",
     );
-    const usedSourceOrders = {};
     const usedFragments = {};
     componentSpecs.forEach(function (spec) {
       const componentName = spec[0];
@@ -1083,7 +1083,7 @@ function validateStage1V2VatBreakdowns_(evidence) {
       const sourceLine = sourceLines.length === 1 ? sourceLines[0] : null;
       const fragmentKey = String(sourceLineOrder) + "\n" + String(valueText);
       if (
-        tuple.sourceLineOrders.indexOf(sourceLineOrder) < 0 ||
+        declaredSourceOrders.indexOf(sourceLineOrder) < 0 ||
         valueText !== tuple[textField] ||
         !sourceLine || sourceLine.roleEvidence !== "summary" ||
         sourceLine.rawText.indexOf(valueText) < 0 ||
@@ -1096,15 +1096,7 @@ function validateStage1V2VatBreakdowns_(evidence) {
         );
       }
       usedFragments[fragmentKey] = true;
-      usedSourceOrders[sourceLineOrder] = true;
     });
-    if (tuple.sourceLineOrders.some(function (order) {
-      return !usedSourceOrders[order];
-    })) {
-      throw new Error(
-        "Stage-1-v2 " + path + " has ambiguous association evidence.",
-      );
-    }
   });
 }
 

@@ -384,7 +384,6 @@ function validateVatBreakdownEvidencePrototype_(
       vatAmount: tuple.vatAmountText,
       total: tuple.totalText,
     };
-    const usedOrders = {};
     const usedFragments = {};
     componentNames.forEach(function (componentName) {
       const provenance = tuple.componentProvenance[componentName];
@@ -411,17 +410,7 @@ function validateVatBreakdownEvidencePrototype_(
         return;
       }
       usedFragments[fragmentKey] = true;
-      usedOrders[provenance.sourceLineOrder] = true;
     });
-    if (tuple.sourceLineOrders.some(function (order) {
-      return !usedOrders[order];
-    })) {
-      conflicts.push({
-        code: "AMBIGUOUS_VAT_BREAKDOWN_ASSOCIATION",
-        rowOrder: null,
-      });
-      invalid = true;
-    }
 
     tuple.sourceLineOrders.forEach(function (order) {
       if (reserved[order] || seenTupleOrders[order]) {
