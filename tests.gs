@@ -54,7 +54,7 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "aggregate reconciliation blind spot —",
     ],
     expectedTestCount: 32,
-    expectedAssertionCount: 240,
+    expectedAssertionCount: 242,
   },
   {
     batchName: "staged-financial-evidence",
@@ -79,7 +79,7 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "Stage-1-v3 projection",
     ],
     expectedTestCount: 29,
-    expectedAssertionCount: 175,
+    expectedAssertionCount: 176,
   },
   {
     batchName: "staged-stage1-request-diagnostics",
@@ -277,7 +277,7 @@ function validatePermanentStagedPartition_(registrations) {
   if (
     registrations.length !== 163 ||
     new Set(names).size !== 163 ||
-    expectedAssertionTotal !== 814 ||
+    expectedAssertionTotal !== 817 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -6599,6 +6599,43 @@ function doGet(options) {
         result.evidencePartition.summaryEvidence.printedProductCount.valueText,
         "2",
       );
+
+      const exactDecomposition = validateOneSummaryEvidencePrototype_(
+        "printedProductCount",
+        {
+          sourceLineOrder: 2,
+          rawText: "Count: 1 article",
+          labelText: "Count:",
+          valueText: "1 article",
+        },
+        {
+          2: observedPrototypeEvidenceLine(2, "Count: 1 article", "summary"),
+        },
+      );
+      const shortenedNumericValue = validateOneSummaryEvidencePrototype_(
+        "printedProductCount",
+        {
+          sourceLineOrder: 2,
+          rawText: "Count: 1 article",
+          labelText: "Count:",
+          valueText: "1",
+        },
+        {
+          2: observedPrototypeEvidenceLine(2, "Count: 1 article", "summary"),
+        },
+      );
+
+      assert.ok(
+        exactDecomposition.conflicts.length === 0 &&
+          exactDecomposition.evidence.valueText === "1 article",
+      );
+      assert.ok(
+        shortenedNumericValue.conflicts.length === 1 &&
+          shortenedNumericValue.conflicts[0].code ===
+            "INCONSISTENT_SUMMARY_RAW_VALUE" &&
+          shortenedNumericValue.conflicts[0].field === "printedProductCount" &&
+          shortenedNumericValue.conflicts[0].rowOrder === 2,
+      );
     },
   );
 
@@ -10869,6 +10906,19 @@ function doGet(options) {
           prompt.indexOf("potentially product-like row") >= 0 &&
           prompt.indexOf('roleEvidence "unknown"') >= 0 &&
           prompt.indexOf("totalTypeEvidence must be null") >= 0,
+      );
+      assert.ok(
+        prompt.indexOf(
+          "copy rawText exactly from the referenced observedLines row",
+        ) >= 0 &&
+          prompt.indexOf("exact leading prefix of rawText") >= 0 &&
+          prompt.indexOf(
+            "exact remaining suffix after trimming only leading and trailing whitespace",
+          ) >= 0 &&
+          prompt.indexOf(
+            "never shorten valueText to only a parsed numeric token",
+          ) >= 0 &&
+          prompt.indexOf("return null for that summary evidence field") >= 0,
       );
     },
   );
