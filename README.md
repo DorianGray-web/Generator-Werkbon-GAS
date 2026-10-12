@@ -7,7 +7,7 @@
 ![Architecture](https://img.shields.io/badge/Architecture-Modular-blueviolet)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-success)
-![Release](https://img.shields.io/badge/Release-v1.10.0-blue)
+![Release](https://img.shields.io/badge/Release-v1.10.1-blue)
 
 ---
 
@@ -15,7 +15,7 @@
 
 Generator-Werkbon-GAS is a modular Google Apps Script project designed to automate the creation of maintenance work orders (`Werkbon`).
 
-The current released version is **v1.10.0**, with production execution in a container-bound Spreadsheet Apps Script project.
+The current released version is **v1.10.1**, with production execution in a container-bound Spreadsheet Apps Script project.
 
 The system uses OpenAI GPT-4o to process construction receipt images and PDF invoices, extract purchased materials, store them in Google Sheets, and generate a ready-to-print archival PDF package containing the work order and its receipt evidence.
 
@@ -243,7 +243,7 @@ Before connecting or testing this version:
 2. Go to **Extensions → Apps Script**.
 3. Verify which bound project belongs to the copied sheet.
 4. Remove obsolete copied script code or old bound project copies from the test environment.
-5. Ensure that only the intended source baseline is used. The current release is v1.10.0.
+5. Ensure that only the intended source baseline is used. The current release is v1.10.1.
 6. Reconfigure Script Properties in the copied project because they may not be transferred automatically.
 
 > Do not delete the production Apps Script project connected to the original working spreadsheet.

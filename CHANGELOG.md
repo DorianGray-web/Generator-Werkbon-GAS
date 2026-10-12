@@ -15,6 +15,27 @@ Version **1.6.0** is the first public release prepared for the open-source commu
 
 ---
 
+## [1.10.1] - 2026-10-12
+
+### Fixed
+
+- Corrected single-item mixed VAT-basis handling for PDF receipts while preserving fail-closed financial reconciliation.
+- Preserved explicit VAT breakdown evidence with component-level source provenance.
+- Separated VAT-summary association evidence from exact component provenance and financial authority.
+- Enforced exact Stage1 summary-evidence decomposition for `rawText`, `labelText`, and `valueText`.
+- Clarified the terminal informational-region role contract: informational observations are allowed only after the summary region begins, without reordering physical lines or weakening structural validation.
+
+### Validation
+
+- Confirmed the Production staged gates with zero failures: `staged-stage1-diagnostics` (29 tests / 177 assertions), `staged-prototype-candidate` (32 / 242), `staged-financial-evidence` (18 / 18), and `staged-image-integration` (32 / 32).
+- Confirmed the permanent staged partition at 163 tests / 818 assertions and the complete registered inventory at 391 tests.
+- Completed the real Production workflow across three source documents, producing six material rows and a complete five-page evidence package with no missing or duplicate evidence.
+- Confirmed Hubo 's-Heerenberg at €48.27 incl. VAT with €8.38 VAT.
+- Confirmed Hubo Didam at a €96.99 document total with VAT basis unresolved, `inclVAT = null`, `vatAmount = null`, and Incl. BTW left blank.
+- Confirmed MijnIJzerwaren at €47.69 excl. VAT, €10.01 VAT, and €57.70 incl. VAT.
+
+---
+
 ## [1.10.0] - 2026-09-22
 
 ### Changed
