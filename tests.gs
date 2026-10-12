@@ -79,7 +79,7 @@ const QUNIT_STAGED_BATCH_PARTITION = [
       "Stage-1-v3 projection",
     ],
     expectedTestCount: 29,
-    expectedAssertionCount: 176,
+    expectedAssertionCount: 177,
   },
   {
     batchName: "staged-stage1-request-diagnostics",
@@ -277,7 +277,7 @@ function validatePermanentStagedPartition_(registrations) {
   if (
     registrations.length !== 163 ||
     new Set(names).size !== 163 ||
-    expectedAssertionTotal !== 817 ||
+    expectedAssertionTotal !== 818 ||
     JSON.stringify(actualPartition) !== JSON.stringify(expectedPartition) ||
     selections.some(function (selection) {
       return !selection.supported || selection.retired;
@@ -6145,6 +6145,37 @@ function doGet(options) {
       );
       const nonterminalEvidence = JSON.parse(JSON.stringify(unknownEvidence));
       nonterminalEvidence.observedLines[1].roleEvidence = "informational";
+      const terminalEvidence = observedPrototypeExtraction(
+        [
+          observedPrototypeRow(
+            1,
+            "Synthetic anchor",
+            "1",
+            "2,00",
+            "2,00",
+            "left_aligned",
+          ),
+          observedPrototypeEvidenceLine(2, "TOTAAL 2,00", "summary"),
+          observedPrototypeEvidenceLine(
+            3,
+            "Synthetic tender context 2,00",
+            "informational",
+          ),
+          observedPrototypeEvidenceLine(4, "BTW 0,35", "summary"),
+        ],
+        {
+          printedProductCount: null,
+          printedTotal: {
+            sourceLineOrder: 2,
+            rawText: "TOTAAL 2,00",
+            labelText: "TOTAAL",
+            valueText: "2,00",
+            totalTypeEvidence: null,
+          },
+        },
+      );
+      const terminalPartition =
+        partitionObservedReceiptEvidencePrototype_(terminalEvidence);
       let unknownCanonical = null;
       let unknownError = null;
       let nonterminalCanonical = null;
@@ -6172,6 +6203,18 @@ function doGet(options) {
           nonterminalName: nonterminalError && nonterminalError.name,
           nonterminalStage: nonterminalError && nonterminalError.stage,
           nonterminalCode: nonterminalError && nonterminalError.code,
+          terminalSummaryCount: terminalPartition.summaryObservations.length,
+          terminalInformationalCount:
+            terminalPartition.informationalObservations.length,
+          terminalRegionConflictCodes: terminalPartition.conflicts
+            .filter(function (conflict) {
+              return (
+                conflict.code === "INFORMATIONAL_OUTSIDE_TERMINAL_REGION"
+              );
+            })
+            .map(function (conflict) {
+              return conflict.code;
+            }),
         },
         {
           unknownCanonical: null,
@@ -6182,6 +6225,9 @@ function doGet(options) {
           nonterminalName: "StagedImageExtractionError",
           nonterminalStage: "structure",
           nonterminalCode: "INFORMATIONAL_OUTSIDE_TERMINAL_REGION",
+          terminalSummaryCount: 2,
+          terminalInformationalCount: 1,
+          terminalRegionConflictCodes: [],
         },
       ));
     },
@@ -10906,6 +10952,20 @@ function doGet(options) {
           prompt.indexOf("potentially product-like row") >= 0 &&
           prompt.indexOf('roleEvidence "unknown"') >= 0 &&
           prompt.indexOf("totalTypeEvidence must be null") >= 0,
+      );
+      assert.ok(
+        prompt.indexOf(
+          'summary region begins at the first observed line classified as roleEvidence "summary"',
+        ) >= 0 &&
+          prompt.indexOf("after the summary region has started") >= 0 &&
+          prompt.indexOf(
+            'Never classify a row as "informational" before the first "summary" row',
+          ) >= 0 &&
+          prompt.indexOf(
+            'use "unknown" rather than treating "informational" as a generic non-product bucket',
+          ) >= 0 &&
+          prompt.indexOf("actual visual top-to-bottom order") >= 0 &&
+          prompt.indexOf("never reorder physical lines") >= 0,
       );
       assert.ok(
         prompt.indexOf(
